@@ -1,1 +1,1 @@
-# Amethyst-Server-Launcher-Core
+# Amethyst-Server-Launcher
