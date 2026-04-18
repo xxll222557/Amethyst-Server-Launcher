@@ -22,3 +22,8 @@ dist-ssr
 *.sln
 *.sw?
 .launcher-data/
+pnpm-lock.yaml
+
+# Rust / Tauri build artifacts
+src-tauri/target/
+target/

@@ -1,0 +1,180 @@
+@media (max-width: 1360px) {
+  .topbar {
+    min-height: 72px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .resource-gauge-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hero h2 {
+    font-size: clamp(1.7rem, 2.4vw, 2.4rem);
+  }
+}
+
+@media (max-width: 1240px) {
+  .topbar-actions .secondary-action {
+    display: none;
+  }
+
+  .tab-button {
+    min-width: 96px;
+    padding: 10px 12px;
+  }
+
+  .topbar-right {
+    gap: 8px;
+  }
+
+  .window-native-button {
+    width: 34px;
+  }
+}
+
+@media (max-width: 1120px) {
+  .hero {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero-actions {
+    justify-content: flex-start;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .topbar-left,
+  .topbar-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .topbar-left {
+    flex-wrap: wrap;
+  }
+
+  .settings-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-side-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    position: static;
+  }
+
+  .settings-content {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .hero,
+  .panel,
+  .stat-card {
+    border-radius: 22px;
+  }
+
+  .stats-grid,
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-side-nav,
+  .settings-form-grid.two-column,
+  .settings-about-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-field.inline {
+    grid-template-columns: 1fr;
+  }
+
+  .resource-gauge-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar-actions,
+  .tab-nav {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .window-controls {
+    width: auto;
+  }
+
+  .window-controls.native {
+    margin-left: auto;
+  }
+
+  .topbar {
+    padding: 12px 14px;
+    min-height: 72px;
+    border-radius: 0;
+  }
+
+  .view-frame {
+    padding: 14px;
+  }
+
+  .tab-button,
+  .topbar-actions button {
+    flex: 1 1 0;
+  }
+
+  .hero h2 {
+    max-width: none;
+  }
+
+  .server-main,
+  .server-meta,
+  .server-actions,
+  .activity-item {
+    flex-direction: column;
+  }
+
+  .activity-time {
+    min-width: 0;
+  }
+
+  .wizard-grid.two-column {
+    grid-template-columns: 1fr;
+  }
+
+  .wizard-actions {
+    flex-direction: column-reverse;
+  }
+
+  .download-center-root {
+    right: 10px;
+    bottom: 10px;
+  }
+
+  .download-fab {
+    width: 52px;
+    height: 52px;
+  }
+
+  .download-center-panel {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 96px);
+  }
+
+  .first-run-steps {
+    grid-template-columns: 1fr;
+  }
+}

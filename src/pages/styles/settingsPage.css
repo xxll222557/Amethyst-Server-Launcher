@@ -1,0 +1,256 @@
+.settings-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-workspace {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.38fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.settings-side-nav {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  position: sticky;
+  top: 8px;
+}
+
+.settings-side-item {
+  text-align: left;
+  padding: 12px 13px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: #f3efe8;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.settings-side-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.settings-side-item:focus-visible {
+  outline: 2px solid rgba(var(--theme-accent-rgb), 0.82);
+  outline-offset: 2px;
+}
+
+.settings-side-item strong,
+.settings-side-item span {
+  display: block;
+}
+
+.settings-side-item span {
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: rgba(243, 239, 232, 0.7);
+}
+
+.settings-side-item.active {
+  border-color: rgba(var(--theme-accent-rgb), 0.45);
+  background: linear-gradient(135deg, rgba(var(--theme-accent-rgb), 0.16), rgba(var(--theme-accent-rgb), 0.05));
+}
+
+.settings-content {
+  display: grid;
+  gap: 24px;
+  max-height: calc(100vh - 200px);
+  overflow: auto;
+  padding-right: 4px;
+  scroll-behavior: smooth;
+}
+
+.settings-section {
+  scroll-margin-top: 8px;
+}
+
+.setting-card.clean {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.setting-card.clean h4 {
+  font-size: 1.1rem;
+  margin-bottom: 10px;
+}
+
+.settings-form-grid {
+  margin-top: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.settings-form-grid.two-column {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-field {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-field span {
+  font-size: 0.84rem;
+  color: rgba(243, 239, 232, 0.76);
+}
+
+.settings-field input,
+.settings-field select,
+.settings-field textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f3efe8;
+}
+
+.settings-field input[type="range"] {
+  min-height: auto;
+  height: 28px;
+  padding: 0;
+  accent-color: var(--theme-accent);
+  background: transparent;
+}
+
+.settings-field textarea {
+  resize: vertical;
+  min-height: 96px;
+}
+
+.settings-field.inline {
+  grid-template-columns: minmax(100px, auto) minmax(160px, 1fr);
+  align-items: center;
+}
+
+.settings-field input:focus,
+.settings-field select:focus,
+.settings-field textarea:focus {
+  outline: 2px solid rgba(var(--theme-accent-rgb), 0.42);
+  outline-offset: 1px;
+}
+
+.settings-color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-color-row input[type="color"] {
+  width: 44px;
+  min-height: 38px;
+  padding: 3px;
+}
+
+.settings-color-row code {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.82rem;
+}
+
+.settings-switch-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.settings-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(243, 239, 232, 0.9);
+}
+
+.settings-switch input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--theme-accent);
+}
+
+.settings-subtitle {
+  margin: 14px 0 6px;
+  font-size: 0.96rem;
+}
+
+.settings-hint-list {
+  margin-top: 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.settings-hint-list p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: rgba(243, 239, 232, 0.76);
+}
+
+.settings-about-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-about-block {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.settings-about-block h5 {
+  margin: 0 0 8px;
+}
+
+.settings-about-block ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  color: rgba(243, 239, 232, 0.78);
+}
+
+.settings-actions {
+  margin-top: 12px;
+  justify-content: flex-start;
+}
+
+.settings-hidden-file {
+  display: none;
+}
+
+.settings-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-file-name {
+  font-size: 0.82rem;
+  color: rgba(243, 239, 232, 0.72);
+}
+
+.settings-folder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-folder-row input[readonly] {
+  cursor: default;
+}

@@ -1,0 +1,25 @@
+:root {
+  --app-min-width: 1180px;
+  --app-min-height: 760px;
+  --theme-accent: #ff9f43;
+  --theme-accent-soft: #ff5d7a;
+  --theme-accent-rgb: 255, 159, 67;
+  --app-user-bg-image: none;
+  --app-bg-layer-1: radial-gradient(circle at top left, rgba(255, 170, 90, 0.22), transparent 28%);
+  --app-bg-layer-2: radial-gradient(circle at bottom right, rgba(62, 92, 255, 0.2), transparent 34%);
+  --app-bg-layer-3: linear-gradient(180deg, #12151d 0%, #0b0f15 100%);
+  font-family: Inter, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #f3efe8;
+  background:
+    var(--app-user-bg-image),
+    var(--app-bg-layer-1),
+    var(--app-bg-layer-2),
+    var(--app-bg-layer-3);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}

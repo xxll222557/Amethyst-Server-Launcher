@@ -1,10 +1,13 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useI18n } from "../i18n";
 
 interface WindowControlsProps {
   platform: "macos" | "windows" | "linux" | "unknown";
 }
 
 export function WindowControls({ platform }: WindowControlsProps) {
+  const { t } = useI18n();
+
   if (platform === "macos") {
     return null;
   }
@@ -42,14 +45,14 @@ export function WindowControls({ platform }: WindowControlsProps) {
   };
 
   return (
-    <div className="window-controls native" aria-label="窗口控制">
-      <button className="window-native-button" aria-label="最小化" type="button" onClick={minimizeWindow}>
+    <div className="window-controls native" aria-label={t("window.controls.aria")}>
+      <button className="window-native-button" aria-label={t("window.controls.minimize")} type="button" onClick={minimizeWindow}>
         <span className="window-native-icon">-</span>
       </button>
-      <button className="window-native-button" aria-label="最大化" type="button" onClick={toggleWindowZoom}>
+      <button className="window-native-button" aria-label={t("window.controls.maximize")} type="button" onClick={toggleWindowZoom}>
         <span className="window-native-icon square" />
       </button>
-      <button className="window-native-button close" aria-label="关闭" type="button" onClick={closeWindow}>
+      <button className="window-native-button close" aria-label={t("window.controls.close")} type="button" onClick={closeWindow}>
         <span className="window-native-icon">×</span>
       </button>
     </div>

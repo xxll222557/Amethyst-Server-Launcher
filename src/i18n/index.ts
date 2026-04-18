@@ -1,22 +1,51 @@
-export type Locale = "zh-CN" | "en-US";
+import { useAppSettings, type AppLanguage } from "../features/appSettings";
+import enUS from "./en-US";
+import zhCN from "./zh-CN";
+
+export type Locale = AppLanguage;
 
 export const defaultLocale: Locale = "zh-CN";
 
-export const translations = {
-  "zh-CN": {
-    launcherName: "Minecraft 启动器",
-    home: "主界面",
-    instances: "实例列表",
-    settings: "设置",
-  },
-  "en-US": {
-    launcherName: "Minecraft Launcher",
-    home: "Home",
-    instances: "Instances",
-    settings: "Settings",
-  },
+const translations = {
+  "zh-CN": zhCN,
+  "en-US": enUS,
 } as const;
 
-export function getTranslation(locale: Locale, key: keyof typeof translations["zh-CN"]) {
-  return translations[locale][key];
+export type TranslationKey = keyof typeof zhCN;
+
+function interpolate(template: string, vars?: Record<string, string | number>) {
+  if (!vars) {
+    return template;
+  }
+
+  return template.replace(/\{\{(\w+)\}\}/g, (_full, key: string) => {
+    const value = vars[key];
+    return value === undefined || value === null ? "" : String(value);
+  });
+}
+
+export function t(locale: Locale, key: TranslationKey, vars?: Record<string, string | number>) {
+  const table = translations[locale] ?? translations[defaultLocale];
+  const fallback = translations[defaultLocale];
+  const raw = table[key] ?? fallback[key] ?? key;
+  return interpolate(raw, vars);
+}
+
+export function useI18n() {
+  const [settings, setSettings] = useAppSettings();
+  const locale = settings.about.language;
+
+  return {
+    locale,
+    t: (key: TranslationKey, vars?: Record<string, string | number>) => t(locale, key, vars),
+    setLocale: (next: Locale) => {
+      setSettings((current) => ({
+        ...current,
+        about: {
+          ...current.about,
+          language: next,
+        },
+      }));
+    },
+  };
 }

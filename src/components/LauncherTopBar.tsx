@@ -1,13 +1,11 @@
 import { WindowControls } from "./WindowControls";
-import { getTranslation, defaultLocale } from "../i18n";
-import type { SystemResourceSnapshot } from "../features/systemResource";
-import { formatBytes, formatPercent } from "../features/systemResource";
+import { useI18n } from "../i18n";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface LauncherTopBarProps {
   platform: "macos" | "windows" | "linux" | "unknown";
   activeView: "home" | "instances" | "settings";
   onActiveViewChange: (view: "home" | "instances" | "settings") => void;
-  systemResources: SystemResourceSnapshot | null;
 }
 
 function ViewIcon({ view }: { view: "home" | "instances" | "settings" }) {
@@ -51,16 +49,45 @@ export function LauncherTopBar({
   platform,
   activeView,
   onActiveViewChange,
-  systemResources,
 }: LauncherTopBarProps) {
-  const t = getTranslation(defaultLocale, "launcherName");
-  const cpuValue = systemResources ? formatPercent(systemResources.cpuUsage) : "--";
-  const memoryValue = systemResources
-    ? `${formatBytes(systemResources.memoryUsed)} / ${formatBytes(systemResources.memoryTotal)}`
-    : "--";
-  const diskValue = systemResources
-    ? `${formatPercent(systemResources.diskTotal > 0 ? (systemResources.diskUsed / systemResources.diskTotal) * 100 : 0)}`
-    : "--";
+  const { t } = useI18n();
+  const viewTabs = useMemo(
+    () => [
+      { key: "home" as const, label: t("app.nav.home") },
+      { key: "instances" as const, label: t("app.nav.instances") },
+      { key: "settings" as const, label: t("app.nav.settings") },
+    ],
+    [t],
+  );
+  const navRef = useRef<HTMLElement | null>(null);
+  const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [indicator, setIndicator] = useState({ left: 0, width: 0, ready: false });
+
+  useEffect(() => {
+    const activeIndex = viewTabs.findIndex((tab) => tab.key === activeView);
+    const nav = navRef.current;
+    const button = buttonRefs.current[activeIndex] ?? null;
+
+    if (!nav || !button) {
+      return;
+    }
+
+    const update = () => {
+      const nextLeft = button.offsetLeft;
+      const nextWidth = button.offsetWidth;
+      setIndicator({ left: nextLeft, width: nextWidth, ready: true });
+    };
+
+    update();
+
+    const observer = new ResizeObserver(update);
+    observer.observe(nav);
+    observer.observe(button);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeView, viewTabs]);
 
   return (
     <header className={`topbar ${platform}`} data-tauri-drag-region>
@@ -68,31 +95,32 @@ export function LauncherTopBar({
         <div className="brand-block compact">
           <div className="brand-mark">A</div>
           <div>
-            <p className="eyebrow">Amethyst Launcher</p>
-            <h1>{t}</h1>
+            <p className="eyebrow">{t("app.brand.title")}</p>
+            <h1>{t("app.brand.launcherName")}</h1>
           </div>
-        </div>
-
-        <div className="topbar-metrics">
-          <span className="metric-pill">CPU {cpuValue}</span>
-          <span className="metric-pill">内存 {memoryValue}</span>
-          <span className="metric-pill">磁盘 {diskValue}</span>
         </div>
       </div>
 
-      <nav className="tab-nav" aria-label="主导航">
-        <button className={`tab-button ${activeView === "home" ? "active" : ""}`} type="button" onClick={() => onActiveViewChange("home")}>
-          <ViewIcon view="home" />
-          <span>{getTranslation(defaultLocale, "home")}</span>
-        </button>
-        <button className={`tab-button ${activeView === "instances" ? "active" : ""}`} type="button" onClick={() => onActiveViewChange("instances")}>
-          <ViewIcon view="instances" />
-          <span>{getTranslation(defaultLocale, "instances")}</span>
-        </button>
-        <button className={`tab-button ${activeView === "settings" ? "active" : ""}`} type="button" onClick={() => onActiveViewChange("settings")}>
-          <ViewIcon view="settings" />
-          <span>{getTranslation(defaultLocale, "settings")}</span>
-        </button>
+      <nav className="tab-nav" aria-label={t("app.nav.main")} ref={navRef}>
+        <span
+          className={`tab-active-indicator ${indicator.ready ? "ready" : ""}`}
+          style={{ width: `${indicator.width}px`, transform: `translateX(${indicator.left}px)` }}
+          aria-hidden="true"
+        />
+        {viewTabs.map((tab, index) => (
+          <button
+            key={tab.key}
+            ref={(node) => {
+              buttonRefs.current[index] = node;
+            }}
+            className={`tab-button ${activeView === tab.key ? "active" : ""}`}
+            type="button"
+            onClick={() => onActiveViewChange(tab.key)}
+          >
+            <ViewIcon view={tab.key} />
+            <span>{tab.label}</span>
+          </button>
+        ))}
       </nav>
 
       <div className="topbar-right">

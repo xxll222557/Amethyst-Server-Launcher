@@ -35,10 +35,10 @@ export function formatPercent(value: number) {
 export function createResourceCards(snapshot: SystemResourceSnapshot | null): SystemResourceCard[] {
   if (!snapshot) {
     return [
-      { label: "CPU", value: "--", hint: "等待系统数据" },
-      { label: "内存", value: "--", hint: "等待系统数据" },
-      { label: "磁盘", value: "--", hint: "等待系统数据" },
-      { label: "刷新", value: "--", hint: "初始化中" },
+      { label: "CPU", value: "--", hint: "Waiting for system data" },
+      { label: "Memory", value: "--", hint: "Waiting for system data" },
+      { label: "Disk", value: "--", hint: "Waiting for system data" },
+      { label: "Refresh", value: "--", hint: "Initializing" },
     ];
   }
 
@@ -46,18 +46,18 @@ export function createResourceCards(snapshot: SystemResourceSnapshot | null): Sy
   const diskPercent = snapshot.diskTotal > 0 ? (snapshot.diskUsed / snapshot.diskTotal) * 100 : 0;
 
   return [
-    { label: "CPU", value: formatPercent(snapshot.cpuUsage), hint: "当前平均占用" },
+    { label: "CPU", value: formatPercent(snapshot.cpuUsage), hint: "Average usage" },
     {
-      label: "内存",
+      label: "Memory",
       value: `${formatBytes(snapshot.memoryUsed)} / ${formatBytes(snapshot.memoryTotal)}`,
-      hint: `占用 ${formatPercent(memoryPercent)}`,
+      hint: `${formatPercent(memoryPercent)} used`,
     },
     {
-      label: "磁盘",
+      label: "Disk",
       value: `${formatBytes(snapshot.diskUsed)} / ${formatBytes(snapshot.diskTotal)}`,
-      hint: `占用 ${formatPercent(diskPercent)}`,
+      hint: `${formatPercent(diskPercent)} used`,
     },
-    { label: "刷新", value: new Date(snapshot.timestamp).toLocaleTimeString(), hint: "系统监控已更新" },
+    { label: "Refresh", value: new Date(snapshot.timestamp).toLocaleTimeString(), hint: "System monitor updated" },
   ];
 }
 

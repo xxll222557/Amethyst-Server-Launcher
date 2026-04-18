@@ -29,7 +29,7 @@ export function ServerCard({ server, selected, onSelect }: ServerCardProps) {
       </div>
 
       <div className="server-meta">
-        <span>玩家 {server.players}</span>
+        <span>Players {server.players}</span>
         <span>{server.path}</span>
       </div>
 
