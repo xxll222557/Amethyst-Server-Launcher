@@ -256,26 +256,13 @@ pub fn run() {
 
             #[cfg(target_os = "macos")]
             {
-                use tauri::TitleBarStyle;
+                use tauri::{LogicalPosition, TitleBarStyle};
 
-                let builder = builder.title_bar_style(TitleBarStyle::Transparent);
-
-                let window = builder.build().expect("failed to build main window");
-
-                use cocoa::appkit::{NSColor, NSWindow};
-                use cocoa::base::{id, nil};
-
-                let ns_window = window.ns_window().expect("missing native window") as id;
-                unsafe {
-                    let bg_color = NSColor::colorWithRed_green_blue_alpha_(
-                        nil,
-                        50.0 / 255.0,
-                        158.0 / 255.0,
-                        163.5 / 255.0,
-                        1.0,
-                    );
-                    ns_window.setBackgroundColor_(bg_color);
-                }
+                let builder = builder
+                    .title_bar_style(TitleBarStyle::Overlay)
+                    .hidden_title(true)
+                    .traffic_light_position(LogicalPosition::new(24.0, 20.0));
+                let _window = builder.build().expect("failed to build main window");
             }
 
             #[cfg(not(target_os = "macos"))]

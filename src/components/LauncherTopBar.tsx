@@ -93,11 +93,7 @@ export function LauncherTopBar({
     <header className={`topbar ${platform}`} data-tauri-drag-region>
       <div className="topbar-left">
         <div className="brand-block compact">
-          <div className="brand-mark">A</div>
-          <div>
-            <p className="eyebrow">{t("app.brand.title")}</p>
-            <h1>{t("app.brand.launcherName")}</h1>
-          </div>
+          <h1 className="topbar-brand-name">{t("app.brand.launcherName")}</h1>
         </div>
       </div>
 

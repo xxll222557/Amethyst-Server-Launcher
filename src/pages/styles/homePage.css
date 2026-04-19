@@ -300,8 +300,8 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  padding: 22px 24px 24px;
+  gap: 14px;
+  padding: 14px 18px 18px;
   flex: 1;
   min-height: 0;
 }

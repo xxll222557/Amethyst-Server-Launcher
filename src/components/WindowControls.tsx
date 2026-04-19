@@ -8,10 +8,6 @@ interface WindowControlsProps {
 export function WindowControls({ platform }: WindowControlsProps) {
   const { t } = useI18n();
 
-  if (platform === "macos") {
-    return null;
-  }
-
   const minimizeWindow = async () => {
     try {
       await getCurrentWindow().minimize();
@@ -43,6 +39,10 @@ export function WindowControls({ platform }: WindowControlsProps) {
       console.error("Failed to close window", error);
     }
   };
+
+  if (platform === "macos") {
+    return null;
+  }
 
   return (
     <div className="window-controls native" aria-label={t("window.controls.aria")}>
