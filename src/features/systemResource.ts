@@ -7,6 +7,8 @@ export interface SystemResourceSnapshot {
   memoryTotal: number;
   diskUsed: number;
   diskTotal: number;
+  networkDownloadBps: number;
+  networkUploadBps: number;
   timestamp: number;
 }
 

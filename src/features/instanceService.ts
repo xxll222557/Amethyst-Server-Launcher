@@ -61,6 +61,33 @@ export interface DownloadProgressEvent {
   message?: string;
 }
 
+export interface MarketDownloadRequest {
+  taskId: string;
+  marketItemId: string;
+  category: "server" | "plugin" | "modpack" | "java";
+  item: string;
+  fileName: string;
+  message?: string;
+}
+
+export interface ParsedInvokeError {
+  code?: string;
+  message: string;
+}
+
+export function parseInvokeError(error: unknown): ParsedInvokeError {
+  const raw = typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
+  const match = raw.match(/^\[([A-Z0-9_]+)\]\s*(.*)$/);
+  if (!match) {
+    return { message: raw };
+  }
+
+  return {
+    code: match[1],
+    message: match[2] || raw,
+  };
+}
+
 export interface JavaRuntimeStatus {
   available: boolean;
   path?: string;
@@ -122,6 +149,10 @@ export async function downloadInstanceCore(instanceId: string, includeJava: bool
 
 export async function downloadInstanceJavaRuntime(instanceId: string) {
   return invoke<string>("download_instance_java_runtime", { instanceId });
+}
+
+export async function downloadMarketAsset(request: MarketDownloadRequest) {
+  return invoke<string>("download_market_asset", { request });
 }
 
 export async function updateInstanceJavaPath(instanceId: string, javaPath?: string) {

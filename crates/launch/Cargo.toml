@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 launcher_data = { path = "../data" }
+fs2 = "0.4"

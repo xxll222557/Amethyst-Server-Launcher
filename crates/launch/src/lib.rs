@@ -1,3 +1,5 @@
+pub mod app;
+
 use launcher_data::InstanceConfig;
 use serde::Serialize;
 use std::fs;

@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
-use sysinfo::{Disks, System};
+use sysinfo::{Disks, Networks, System};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,12 +12,16 @@ pub struct SystemResourceSnapshot {
     memory_total: u64,
     disk_used: u64,
     disk_total: u64,
+    network_download_bps: u64,
+    network_upload_bps: u64,
     timestamp: u64,
 }
 
 struct MonitorState {
     system: System,
     disks: Disks,
+    networks: Networks,
+    last_network_sample: Option<(u64, u64, u64)>,
 }
 
 impl MonitorState {
@@ -29,13 +33,56 @@ impl MonitorState {
         Self {
             system,
             disks: Disks::new_with_refreshed_list(),
+            networks: Networks::new_with_refreshed_list(),
+            last_network_sample: None,
         }
     }
 
+    fn sample_network_bps(&mut self, now: u64) -> (u64, u64) {
+        self.networks.refresh();
+
+        let total_download = self
+            .networks
+            .iter()
+            .map(|(_, network)| network.total_received())
+            .sum::<u64>();
+        let total_upload = self
+            .networks
+            .iter()
+            .map(|(_, network)| network.total_transmitted())
+            .sum::<u64>();
+
+        let (download_bps, upload_bps) = if let Some((last_down, last_up, last_at)) = self.last_network_sample {
+            let elapsed_ms = now.saturating_sub(last_at);
+            if elapsed_ms > 0 {
+                let elapsed_secs = elapsed_ms as f64 / 1000.0;
+                let down_delta = total_download.saturating_sub(last_down);
+                let up_delta = total_upload.saturating_sub(last_up);
+                (
+                    (down_delta as f64 / elapsed_secs) as u64,
+                    (up_delta as f64 / elapsed_secs) as u64,
+                )
+            } else {
+                (0, 0)
+            }
+        } else {
+            (0, 0)
+        };
+
+        self.last_network_sample = Some((total_download, total_upload, now));
+        (download_bps, upload_bps)
+    }
+
     fn collect(&mut self) -> SystemResourceSnapshot {
+        let timestamp = now_millis();
+        let (network_download_bps, network_upload_bps) = self.sample_network_bps(timestamp);
+
         #[cfg(target_os = "macos")]
         {
-            if let Some(snapshot) = collect_system_resources_macos() {
+            if let Some(mut snapshot) = collect_system_resources_macos() {
+                snapshot.network_download_bps = network_download_bps;
+                snapshot.network_upload_bps = network_upload_bps;
+                snapshot.timestamp = timestamp;
                 return snapshot;
             }
         }
@@ -80,7 +127,9 @@ impl MonitorState {
             memory_total,
             disk_used,
             disk_total,
-            timestamp: now_millis(),
+            network_download_bps,
+            network_upload_bps,
+            timestamp,
         }
     }
 }
@@ -106,6 +155,8 @@ fn collect_system_resources_macos() -> Option<SystemResourceSnapshot> {
         memory_total,
         disk_used,
         disk_total,
+        network_download_bps: 0,
+        network_upload_bps: 0,
         timestamp: now_millis(),
     })
 }
@@ -248,3 +299,4 @@ pub fn collect_system_resources() -> SystemResourceSnapshot {
         }
     }
 }
+

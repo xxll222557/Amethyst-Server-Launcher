@@ -17,6 +17,9 @@ export interface DownloadTaskView {
   updatedAt: number;
   retryType?: "core" | "java-runtime";
   includeJava?: boolean;
+  marketItemId?: string;
+  marketCategory?: "server" | "plugin" | "modpack" | "java";
+  fileName?: string;
 }
 
 interface DownloadCenterProps {
@@ -128,22 +131,22 @@ export function DownloadCenter({ open, tasks, onToggleOpen, onClose, onRetryTask
           </div>
 
           <div className="download-center-controls">
-            <label className="download-toggle">
-              <input
-                type="checkbox"
-                checked={hideCompleted}
-                onChange={(event) => setHideCompleted(event.target.checked)}
-              />
-              <span>{t("downloadCenter.hideCompleted")}</span>
-            </label>
-            <label className="download-toggle">
-              <input
-                type="checkbox"
-                checked={showOnlyFailed}
-                onChange={(event) => setShowOnlyFailed(event.target.checked)}
-              />
-              <span>{t("downloadCenter.onlyFailed")}</span>
-            </label>
+            <button
+              className={`download-toggle-chip ${hideCompleted ? "active" : ""}`}
+              type="button"
+              onClick={() => setHideCompleted((prev) => !prev)}
+              aria-pressed={hideCompleted}
+            >
+              {t("downloadCenter.hideCompleted")}
+            </button>
+            <button
+              className={`download-toggle-chip ${showOnlyFailed ? "active" : ""}`}
+              type="button"
+              onClick={() => setShowOnlyFailed((prev) => !prev)}
+              aria-pressed={showOnlyFailed}
+            >
+              {t("downloadCenter.onlyFailed")}
+            </button>
             <button
               className="chip-button"
               type="button"

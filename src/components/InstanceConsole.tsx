@@ -85,6 +85,9 @@ function formatSize(size?: number) {
 export function InstanceConsole({ open, instance, onClose, onUpdated }: InstanceConsoleProps) {
   const { t } = useI18n();
   const [tab, setTab] = useState<ConsoleTab>("logs");
+  const tabNavRef = useRef<HTMLDivElement | null>(null);
+  const tabButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [tabIndicator, setTabIndicator] = useState({ left: 0, width: 0, ready: false });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
 
@@ -160,6 +163,35 @@ export function InstanceConsole({ open, instance, onClose, onUpdated }: Instance
     shouldAutoScrollRef.current = true;
     setNotice("");
   }, [instance, open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const keys: ConsoleTab[] = ["logs", "files", "settings"];
+    const activeIndex = keys.findIndex((key) => key === tab);
+    const nav = tabNavRef.current;
+    const button = tabButtonRefs.current[activeIndex] ?? null;
+
+    if (!nav || !button) {
+      return;
+    }
+
+    const update = () => {
+      setTabIndicator({ left: button.offsetLeft, width: button.offsetWidth, ready: true });
+    };
+
+    update();
+
+    const observer = new ResizeObserver(update);
+    observer.observe(nav);
+    observer.observe(button);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [open, tab]);
 
   const handleLogScroll = () => {
     const node = logPreRef.current;
@@ -600,11 +632,19 @@ export function InstanceConsole({ open, instance, onClose, onUpdated }: Instance
           </button>
         </div>
 
-        <div className="instance-console-tabs">
+        <div className="instance-console-tabs" ref={tabNavRef}>
+          <span
+            className={`instance-console-tab-indicator ${tabIndicator.ready ? "ready" : ""}`}
+            style={{ width: `${tabIndicator.width}px`, transform: `translateX(${tabIndicator.left}px)` }}
+            aria-hidden="true"
+          />
           <button
             className={`tab-button ${tab === "logs" ? "active" : ""}`}
             type="button"
             onClick={() => setTab("logs")}
+            ref={(node) => {
+              tabButtonRefs.current[0] = node;
+            }}
           >
             {t("console.tab.logs")}
           </button>
@@ -612,6 +652,9 @@ export function InstanceConsole({ open, instance, onClose, onUpdated }: Instance
             className={`tab-button ${tab === "files" ? "active" : ""}`}
             type="button"
             onClick={() => setTab("files")}
+            ref={(node) => {
+              tabButtonRefs.current[1] = node;
+            }}
           >
             {t("console.tab.files")}
           </button>
@@ -619,6 +662,9 @@ export function InstanceConsole({ open, instance, onClose, onUpdated }: Instance
             className={`tab-button ${tab === "settings" ? "active" : ""}`}
             type="button"
             onClick={() => setTab("settings")}
+            ref={(node) => {
+              tabButtonRefs.current[2] = node;
+            }}
           >
             {t("console.tab.settings")}
           </button>

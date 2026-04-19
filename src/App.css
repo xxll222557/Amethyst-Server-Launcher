@@ -2,6 +2,8 @@
 @import "./theme/base.css";
 @import "./components/styles/launcherTopBar.css";
 @import "./pages/styles/homePage.css";
+@import "./pages/styles/marketPage.css";
+@import "./pages/styles/downloadsPage.css";
 @import "./pages/styles/settingsPage.css";
 @import "./components/styles/modals.css";
 @import "./components/styles/downloadCenter.css";

@@ -23,6 +23,7 @@ interface UseDeleteFlowOptions {
 
 export function useDeleteFlow(options: UseDeleteFlowOptions) {
   const { t, onNotify, setMessage, onInstanceDeleted, onDeleteError, refreshInstances } = options;
+  const undoWindowMs = 5000;
 
   const [deletePromptInstance, setDeletePromptInstance] = useState<InstanceConfig | null>(null);
   const [deletePromptRunning, setDeletePromptRunning] = useState(false);
@@ -83,7 +84,7 @@ export function useDeleteFlow(options: UseDeleteFlowOptions) {
           setMessage(text);
           onNotify({ tone: "danger", title: t("instances.deleteFailed"), detail: instance.name });
         }
-      }, 3000);
+      }, undoWindowMs);
 
       pendingDeleteTimersRef.current[instance.id] = timerId;
       setMessage(t("instances.deleteQueuedMessage", { name: instance.name }));
@@ -92,7 +93,7 @@ export function useDeleteFlow(options: UseDeleteFlowOptions) {
         title: t("instances.deleteQueued"),
         detail: t("instances.deleteQueuedDetail", { name: instance.name }),
         actionLabel: t("instances.undo"),
-        durationMs: 3000,
+        durationMs: undoWindowMs,
         onAction: () => {
           const currentTimer = pendingDeleteTimersRef.current[instance.id];
           if (!currentTimer) {

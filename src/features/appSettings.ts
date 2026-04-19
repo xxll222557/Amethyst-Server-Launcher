@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 export const APP_SETTINGS_STORAGE_KEY = "amethyst-launcher-settings-v1";
 export const APP_SETTINGS_EVENT = "amethyst-app-settings-change";
 
-export type BackgroundPreset = "aurora" | "sunset" | "forest" | "midnight";
+export type BackgroundPreset = "aurora" | "sunset" | "forest" | "midnight" | "ocean" | "dawn" | "ember" | "graphite";
+export type AppearanceMode = "dark" | "light";
 export type DownloadSource = "official" | "mirror-cn" | "auto";
 export type UpdateChannel = "stable" | "beta";
 export type AppLanguage = "zh-CN" | "en-US";
@@ -23,6 +24,7 @@ export interface LaunchSettings {
 }
 
 export interface PersonalizationSettings {
+  appearanceMode: AppearanceMode;
   themeColor: string;
   backgroundPreset: BackgroundPreset;
   backgroundImageUrl: string;
@@ -63,6 +65,7 @@ export const defaultAppSettings: AppSettings = {
     enableGcTuning: true,
   },
   personalization: {
+    appearanceMode: "dark",
     themeColor: "#ff9f43",
     backgroundPreset: "aurora",
     backgroundImageUrl: "",
@@ -126,6 +129,10 @@ function mergeSettings(partial: unknown): AppSettings {
           : defaultAppSettings.launch.enableGcTuning,
     },
     personalization: {
+      appearanceMode:
+        personalization.appearanceMode === "dark" || personalization.appearanceMode === "light"
+          ? personalization.appearanceMode
+          : defaultAppSettings.personalization.appearanceMode,
       themeColor:
         typeof personalization.themeColor === "string"
           ? personalization.themeColor
@@ -134,7 +141,11 @@ function mergeSettings(partial: unknown): AppSettings {
         personalization.backgroundPreset === "aurora" ||
         personalization.backgroundPreset === "sunset" ||
         personalization.backgroundPreset === "forest" ||
-        personalization.backgroundPreset === "midnight"
+        personalization.backgroundPreset === "midnight" ||
+        personalization.backgroundPreset === "ocean" ||
+        personalization.backgroundPreset === "dawn" ||
+        personalization.backgroundPreset === "ember" ||
+        personalization.backgroundPreset === "graphite"
           ? personalization.backgroundPreset
           : defaultAppSettings.personalization.backgroundPreset,
       backgroundImageUrl:

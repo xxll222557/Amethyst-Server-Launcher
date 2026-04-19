@@ -5,7 +5,13 @@ edition = "2021"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-fs2 = "0.4"
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
 launcher_data = { path = "../data" }
 launcher_launch = { path = "../launch" }
+launcher_monitor = { path = "../monitor" }
+launcher_download = { path = "../download" }
+launcher_market = { path = "../market" }
+launcher_folder = { path = "../folder" }
+launcher_install = { path = "../install" }

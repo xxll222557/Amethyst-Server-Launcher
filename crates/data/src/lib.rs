@@ -74,6 +74,14 @@ pub fn list_instances(base_dir: &Path) -> Result<Vec<InstanceConfig>, String> {
     Ok(instances)
 }
 
+pub fn get_instance(base_dir: &Path, instance_id: &str) -> Result<InstanceConfig, String> {
+    let instances = list_instances(base_dir)?;
+    instances
+        .into_iter()
+        .find(|item| item.id == instance_id)
+        .ok_or_else(|| format!("instance not found: {instance_id}"))
+}
+
 fn save_instances(base_dir: &Path, instances: &[InstanceConfig]) -> Result<(), String> {
     let body = serde_json::to_string_pretty(instances)
         .map_err(|err| format!("failed to serialize instances: {err}"))?;

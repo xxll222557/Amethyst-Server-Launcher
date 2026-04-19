@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SystemResourcePanel } from "../components/SystemResourcePanel";
 import {
   getInstanceProcessStatus,
@@ -53,6 +53,9 @@ export function HomePage({
   const [message, setMessage] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [quickFilter, setQuickFilter] = useState<InstanceQuickFilter>("all");
+  const quickFilterNavRef = useRef<HTMLDivElement | null>(null);
+  const quickFilterButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [quickFilterIndicator, setQuickFilterIndicator] = useState({ left: 0, width: 0, ready: false });
 
   const refreshHomeData = async (silent = false) => {
     setLoading(true);
@@ -122,6 +125,35 @@ export function HomePage({
     return instances;
   }, [instances, quickFilter, runningMap]);
 
+  useEffect(() => {
+    const keys: InstanceQuickFilter[] = ["all", "running", "not-ready"];
+    const activeIndex = keys.findIndex((key) => key === quickFilter);
+    const nav = quickFilterNavRef.current;
+    const button = quickFilterButtonRefs.current[activeIndex] ?? null;
+
+    if (!nav || !button) {
+      return;
+    }
+
+    const update = () => {
+      setQuickFilterIndicator({
+        left: button.offsetLeft,
+        width: button.offsetWidth,
+        ready: true,
+      });
+    };
+
+    update();
+
+    const observer = new ResizeObserver(update);
+    observer.observe(nav);
+    observer.observe(button);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [quickFilter, filterCounts.all, filterCounts.running, filterCounts["not-ready"]]);
+
   return (
     <div className="home-app-layout">
       <SystemResourcePanel
@@ -140,11 +172,19 @@ export function HomePage({
               <h3>{t("home.instances.title")}</h3>
             </div>
             <div className="home-toolbar-strip">
-              <div className="home-instance-filters" role="tablist" aria-label={t("home.filters.aria")}>
+              <div className="home-instance-filters" role="tablist" aria-label={t("home.filters.aria")} ref={quickFilterNavRef}>
+                <span
+                  className={`home-filter-indicator ${quickFilterIndicator.ready ? "ready" : ""}`}
+                  style={{ width: `${quickFilterIndicator.width}px`, transform: `translateX(${quickFilterIndicator.left}px)` }}
+                  aria-hidden="true"
+                />
                 <button
                   className={`home-filter-chip ${quickFilter === "all" ? "active" : ""}`}
                   type="button"
                   onClick={() => setQuickFilter("all")}
+                  ref={(node) => {
+                    quickFilterButtonRefs.current[0] = node;
+                  }}
                 >
                   {t("home.filters.all")} {filterCounts.all}
                 </button>
@@ -152,6 +192,9 @@ export function HomePage({
                   className={`home-filter-chip ${quickFilter === "running" ? "active" : ""}`}
                   type="button"
                   onClick={() => setQuickFilter("running")}
+                  ref={(node) => {
+                    quickFilterButtonRefs.current[1] = node;
+                  }}
                 >
                   {t("home.filters.running")} {filterCounts.running}
                 </button>
@@ -159,6 +202,9 @@ export function HomePage({
                   className={`home-filter-chip ${quickFilter === "not-ready" ? "active" : ""}`}
                   type="button"
                   onClick={() => setQuickFilter("not-ready")}
+                  ref={(node) => {
+                    quickFilterButtonRefs.current[2] = node;
+                  }}
                 >
                   {t("home.filters.notReady")} {filterCounts["not-ready"]}
                 </button>

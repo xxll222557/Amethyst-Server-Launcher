@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   checkInstancePreflight,
   createInstanceConfig,
+  deleteInstance,
   downloadInstanceCore,
   downloadInstanceJavaRuntime,
   exportDiagnosticsReport,
@@ -13,7 +14,7 @@ import {
   type InstanceConfig,
 } from "../features/instanceService";
 import { InstanceCreationWizard } from "../components/InstanceCreationWizard";
-import { DownloadCenter, type DownloadTaskView } from "../components/DownloadCenter";
+import type { DownloadTaskView } from "../components/DownloadCenter";
 import { InstanceConsole } from "../components/InstanceConsole";
 import { DeleteInstancePromptModal } from "../components/DeleteInstancePromptModal";
 import { JavaRuntimePromptModal } from "../components/JavaRuntimePromptModal";
@@ -39,6 +40,32 @@ import { useI18n } from "../i18n";
 type InstanceViewIntentType = "none" | "create" | "downloads" | "open-console";
 const CUSTOM_CORE_SERVER_TYPE = "custom-core";
 const LEGACY_CUSTOM_CORE_SERVER_TYPE = "\u81ea\u5b9a\u4e49\u6838\u5fc3";
+const INSTANCE_GROUPS_KEY = "asl-instance-groups-v1";
+const INSTANCE_GROUP_MAP_KEY = "asl-instance-group-map-v1";
+const INSTANCE_META_KEY = "asl-instance-meta-v1";
+const INSTANCE_CUSTOM_GROUPS_EXPANDED_KEY = "asl-instance-groups-expanded-v1";
+const BATCH_DELETE_UNDO_MS = 5000;
+
+type GroupFilter = "all" | "ungrouped" | string;
+
+interface InstanceGroup {
+  id: string;
+  name: string;
+  color: string;
+}
+
+interface InstanceMeta {
+  name?: string;
+  description?: string;
+  tags?: string;
+}
+
+interface InstanceSettingsDraft {
+  name: string;
+  description: string;
+  tags: string;
+  groupId: string;
+}
 
 interface InstancesPageProps {
   intent?: {
@@ -54,45 +81,442 @@ interface InstancesPageProps {
     onAction?: () => void;
     durationMs?: number;
   }) => void;
+  downloadTasks: DownloadTaskView[];
+  onDownloadTasksChange: Dispatch<SetStateAction<DownloadTaskView[]>>;
+  onOpenDownloadsView: () => void;
 }
-export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
+export function InstancesPage({
+  intent,
+  onNotify,
+  downloadTasks,
+  onDownloadTasksChange,
+  onOpenDownloadsView,
+}: InstancesPageProps) {
   const { t, locale } = useI18n();
   const [instances, setInstances] = useState<InstanceConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [wizardOpen, setWizardOpen] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [downloadTasks, setDownloadTasks] = useState<DownloadTaskView[]>([]);
-  const [downloadCenterOpen, setDownloadCenterOpen] = useState(false);
+  const [groups, setGroups] = useState<InstanceGroup[]>(() => {
+    try {
+      const raw = window.localStorage.getItem(INSTANCE_GROUPS_KEY);
+      if (!raw) {
+        return [];
+      }
+      const parsed = JSON.parse(raw) as Array<{ id?: string; name?: string; color?: string }>;
+      return Array.isArray(parsed)
+        ? parsed
+            .filter((item) => typeof item?.id === "string" && typeof item?.name === "string")
+            .map((item) => ({
+              id: item.id as string,
+              name: item.name as string,
+              color: typeof item.color === "string" && /^#[0-9a-fA-F]{6}$/.test(item.color) ? item.color : "#ff9f43",
+            }))
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  const [instanceGroupMap, setInstanceGroupMap] = useState<Record<string, string>>(() => {
+    try {
+      const raw = window.localStorage.getItem(INSTANCE_GROUP_MAP_KEY);
+      if (!raw) {
+        return {};
+      }
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  const [activeGroupFilter, setActiveGroupFilter] = useState<GroupFilter>("all");
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [groupNameInput, setGroupNameInput] = useState("");
+  const [groupColorInput, setGroupColorInput] = useState("#ff9f43");
+  const [instanceMetaMap, setInstanceMetaMap] = useState<Record<string, InstanceMeta>>(() => {
+    try {
+      const raw = window.localStorage.getItem(INSTANCE_META_KEY);
+      if (!raw) {
+        return {};
+      }
+      const parsed = JSON.parse(raw) as Record<string, InstanceMeta>;
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  const [activeSettingsInstanceId, setActiveSettingsInstanceId] = useState<string | null>(null);
+  const [customGroupsExpanded, setCustomGroupsExpanded] = useState(
+    () => window.localStorage.getItem(INSTANCE_CUSTOM_GROUPS_EXPANDED_KEY) !== "0",
+  );
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedInstanceIds, setSelectedInstanceIds] = useState<string[]>([]);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const [bulkMoveTargetGroup, setBulkMoveTargetGroup] = useState("ungrouped");
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [batchDeleteConfirmOpen, setBatchDeleteConfirmOpen] = useState(false);
   const [consoleInstance, setConsoleInstance] = useState<InstanceConfig | null>(null);
   const [javaPromptInstance, setJavaPromptInstance] = useState<InstanceConfig | null>(null);
   const [javaPromptReason, setJavaPromptReason] = useState("");
+  const [settingsDraft, setSettingsDraft] = useState<InstanceSettingsDraft | null>(null);
   const javaPromptResolverRef = useRef<((value: boolean) => void) | null>(null);
   const handledIntentNonceRef = useRef<number | null>(null);
   const speedSampleRef = useRef<Record<string, { bytes: number; at: number }>>({});
   const recentErrorsRef = useRef<string[]>([]);
+  const pendingBatchDeleteTimerRef = useRef<number | null>(null);
+  const pendingBatchDeleteIdsRef = useRef<string[]>([]);
 
   const isCustomCoreInstance = (instance: InstanceConfig) =>
     instance.serverType === CUSTOM_CORE_SERVER_TYPE || instance.serverType === LEGACY_CUSTOM_CORE_SERVER_TYPE;
 
+  useEffect(() => {
+    window.localStorage.setItem(INSTANCE_GROUPS_KEY, JSON.stringify(groups));
+  }, [groups]);
+
+  useEffect(() => {
+    window.localStorage.setItem(INSTANCE_GROUP_MAP_KEY, JSON.stringify(instanceGroupMap));
+  }, [instanceGroupMap]);
+
+  useEffect(() => {
+    window.localStorage.setItem(INSTANCE_META_KEY, JSON.stringify(instanceMetaMap));
+  }, [instanceMetaMap]);
+
+  useEffect(() => {
+    window.localStorage.setItem(INSTANCE_CUSTOM_GROUPS_EXPANDED_KEY, customGroupsExpanded ? "1" : "0");
+  }, [customGroupsExpanded]);
+
+  useEffect(() => {
+    return () => {
+      if (pendingBatchDeleteTimerRef.current) {
+        window.clearTimeout(pendingBatchDeleteTimerRef.current);
+        pendingBatchDeleteTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const displayedInstances = useMemo(() => {
+    if (activeGroupFilter === "all") {
+      return instances;
+    }
+
+    if (activeGroupFilter === "ungrouped") {
+      return instances.filter((instance) => !instanceGroupMap[instance.id]);
+    }
+
+    return instances.filter((instance) => instanceGroupMap[instance.id] === activeGroupFilter);
+  }, [activeGroupFilter, instanceGroupMap, instances]);
+
+  const ungroupedCount = useMemo(
+    () => instances.filter((instance) => !instanceGroupMap[instance.id]).length,
+    [instanceGroupMap, instances],
+  );
+
+  const displayedInstanceIds = useMemo(() => displayedInstances.map((item) => item.id), [displayedInstances]);
+
+  useEffect(() => {
+    if (selectionMode) {
+      return;
+    }
+
+    setSelectedInstanceIds([]);
+    setSelectedGroupIds([]);
+  }, [selectionMode]);
+
+  useEffect(() => {
+    if (activeSettingsInstanceId) {
+      return;
+    }
+
+    setSettingsDraft(null);
+  }, [activeSettingsInstanceId]);
+
+  const addGroup = () => {
+    const nextName = groupNameInput.trim();
+    if (!nextName) {
+      return;
+    }
+
+    const normalizedColor = /^#[0-9a-fA-F]{6}$/.test(groupColorInput) ? groupColorInput : "#ff9f43";
+    const id = `group-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    setGroups((prev) => [...prev, { id, name: nextName, color: normalizedColor }]);
+    setGroupNameInput("");
+    setGroupColorInput("#ff9f43");
+    setGroupModalOpen(false);
+    setActiveGroupFilter(id);
+  };
+
+  const renameGroup = (group: InstanceGroup) => {
+    const nextName = window.prompt(t("instances.group.renamePrompt"), group.name)?.trim();
+    if (!nextName) {
+      return;
+    }
+    setGroups((prev) => prev.map((item) => (item.id === group.id ? { ...item, name: nextName } : item)));
+  };
+
+  const deleteGroup = (group: InstanceGroup) => {
+    const confirmed = window.confirm(t("instances.group.deleteConfirm", { name: group.name }));
+    if (!confirmed) {
+      return;
+    }
+
+    setGroups((prev) => prev.filter((item) => item.id !== group.id));
+    setInstanceGroupMap((prev) => {
+      const entries = Object.entries(prev).filter(([, groupId]) => groupId !== group.id);
+      return Object.fromEntries(entries);
+    });
+
+    setActiveGroupFilter((current) => (current === group.id ? "all" : current));
+  };
+
+  const toggleInstanceSelection = (instanceId: string) => {
+    setSelectedInstanceIds((prev) =>
+      prev.includes(instanceId) ? prev.filter((item) => item !== instanceId) : [...prev, instanceId],
+    );
+  };
+
+  const toggleGroupSelection = (groupId: string) => {
+    setSelectedGroupIds((prev) =>
+      prev.includes(groupId) ? prev.filter((item) => item !== groupId) : [...prev, groupId],
+    );
+  };
+
+  const batchDeleteSelectedGroups = () => {
+    if (selectedGroupIds.length === 0) {
+      return;
+    }
+
+    const selectedGroups = groups.filter((group) => selectedGroupIds.includes(group.id));
+    const confirmed = window.confirm(
+      t("instances.bulk.deleteGroupsConfirm", {
+        count: selectedGroups.length,
+      }),
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const selectedSet = new Set(selectedGroupIds);
+    setGroups((prev) => prev.filter((group) => !selectedSet.has(group.id)));
+    setInstanceGroupMap((prev) => {
+      const entries = Object.entries(prev).filter(([, groupId]) => !selectedSet.has(groupId));
+      return Object.fromEntries(entries);
+    });
+    setActiveGroupFilter((current) => (selectedSet.has(current) ? "all" : current));
+    setSelectedGroupIds([]);
+
+    onNotify({
+      tone: "success",
+      title: t("instances.bulk.deleteGroupsDone"),
+      detail: t("instances.bulk.deleteGroupsDoneDetail", { count: selectedGroups.length }),
+    });
+  };
+
+  const batchDeleteSelectedInstances = async () => {
+    if (selectedInstanceIds.length === 0 || bulkDeleting) {
+      return;
+    }
+
+    setBatchDeleteConfirmOpen(false);
+
+    const deletingIds = [...selectedInstanceIds];
+    setSelectedInstanceIds([]);
+
+    if (pendingBatchDeleteTimerRef.current) {
+      window.clearTimeout(pendingBatchDeleteTimerRef.current);
+    }
+
+    pendingBatchDeleteIdsRef.current = deletingIds;
+    setMessage(t("instances.bulk.deleteQueuedMessage", { count: deletingIds.length, seconds: 5 }));
+
+    const timerId = window.setTimeout(async () => {
+      const queuedIds = [...pendingBatchDeleteIdsRef.current];
+      pendingBatchDeleteIdsRef.current = [];
+      pendingBatchDeleteTimerRef.current = null;
+
+      if (queuedIds.length === 0) {
+        return;
+      }
+
+      setBulkDeleting(true);
+      try {
+        const results = await Promise.allSettled(queuedIds.map((instanceId) => deleteInstance(instanceId)));
+        const successCount = results.filter((item) => item.status === "fulfilled").length;
+        const failedCount = results.length - successCount;
+
+        setInstanceGroupMap((prev) => {
+          const next: Record<string, string> = {};
+          Object.entries(prev).forEach(([instanceId, groupId]) => {
+            if (!queuedIds.includes(instanceId)) {
+              next[instanceId] = groupId;
+            }
+          });
+          return next;
+        });
+
+        setInstanceMetaMap((prev) => {
+          const next: Record<string, InstanceMeta> = {};
+          Object.entries(prev).forEach(([instanceId, meta]) => {
+            if (!queuedIds.includes(instanceId)) {
+              next[instanceId] = meta;
+            }
+          });
+          return next;
+        });
+
+        setActiveSettingsInstanceId((current) => (current && queuedIds.includes(current) ? null : current));
+        setConsoleInstance((current) => (current && queuedIds.includes(current.id) ? null : current));
+
+        await refreshInstances();
+
+        if (failedCount === 0) {
+          onNotify({
+            tone: "success",
+            title: t("instances.bulk.deleteInstancesDone"),
+            detail: t("instances.bulk.deleteInstancesDoneDetail", { count: successCount }),
+          });
+        } else {
+          onNotify({
+            tone: "danger",
+            title: t("instances.bulk.deleteInstancesPartial"),
+            detail: t("instances.bulk.deleteInstancesPartialDetail", { success: successCount, failed: failedCount }),
+          });
+        }
+      } finally {
+        setBulkDeleting(false);
+      }
+    }, BATCH_DELETE_UNDO_MS);
+
+    pendingBatchDeleteTimerRef.current = timerId;
+
+    onNotify({
+      tone: "danger",
+      title: t("instances.bulk.deleteQueuedTitle"),
+      detail: t("instances.bulk.deleteQueuedDetail", { count: deletingIds.length, seconds: 5 }),
+      actionLabel: t("instances.undo"),
+      durationMs: BATCH_DELETE_UNDO_MS,
+      onAction: () => {
+        if (!pendingBatchDeleteTimerRef.current) {
+          return;
+        }
+
+        window.clearTimeout(pendingBatchDeleteTimerRef.current);
+        pendingBatchDeleteTimerRef.current = null;
+        pendingBatchDeleteIdsRef.current = [];
+        setMessage(t("instances.bulk.deleteUndoneMessage"));
+        onNotify({ tone: "info", title: t("instances.deleteUndone") });
+      },
+    });
+  };
+
+  const batchMoveSelectedInstances = () => {
+    if (selectedInstanceIds.length === 0) {
+      return;
+    }
+
+    const selectedSet = new Set(selectedInstanceIds);
+
+    setInstanceGroupMap((prev) => {
+      const next = { ...prev };
+      selectedSet.forEach((instanceId) => {
+        if (bulkMoveTargetGroup === "ungrouped") {
+          delete next[instanceId];
+        } else {
+          next[instanceId] = bulkMoveTargetGroup;
+        }
+      });
+      return next;
+    });
+
+    setSelectedInstanceIds([]);
+    onNotify({
+      tone: "success",
+      title: t("instances.bulk.moveDone"),
+      detail: t("instances.bulk.moveDoneDetail", { count: selectedSet.size }),
+    });
+  };
+
+  const getDisplayName = (instance: InstanceConfig) => {
+    const customName = instanceMetaMap[instance.id]?.name?.trim();
+    return customName || instance.name;
+  };
+
+  const getDisplayDescription = (instance: InstanceConfig) => {
+    const customDescription = instanceMetaMap[instance.id]?.description?.trim();
+    return customDescription || instance.frameworkDescription || "";
+  };
+
+  const getDisplayTags = (instance: InstanceConfig) => {
+    const customTags = instanceMetaMap[instance.id]?.tags?.trim();
+    if (!customTags) {
+      return [] as string[];
+    }
+    return customTags
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  };
+
+  const updateInstanceMeta = (instanceId: string, patch: Partial<InstanceMeta>) => {
+    setInstanceMetaMap((prev) => {
+      const nextItem = {
+        ...(prev[instanceId] ?? {}),
+        ...patch,
+      };
+
+      return {
+        ...prev,
+        [instanceId]: nextItem,
+      };
+    });
+  };
+
+  const openSettingsModal = (instance: InstanceConfig) => {
+    const currentMeta = instanceMetaMap[instance.id] ?? {};
+    setSettingsDraft({
+      name: currentMeta.name ?? instance.name,
+      description: currentMeta.description ?? (instance.frameworkDescription ?? ""),
+      tags: currentMeta.tags ?? "",
+      groupId: instanceGroupMap[instance.id] ?? "ungrouped",
+    });
+    setActiveSettingsInstanceId(instance.id);
+  };
+
+  const closeSettingsModal = () => {
+    setActiveSettingsInstanceId(null);
+    setSettingsDraft(null);
+  };
+
+  const saveSettingsModal = () => {
+    if (!activeSettingsInstanceId || !settingsDraft) {
+      return;
+    }
+
+    updateInstanceMeta(activeSettingsInstanceId, {
+      name: settingsDraft.name,
+      description: settingsDraft.description,
+      tags: settingsDraft.tags,
+    });
+
+    setInstanceGroupMap((prev) => {
+      if (settingsDraft.groupId === "ungrouped") {
+        const { [activeSettingsInstanceId]: _removed, ...rest } = prev;
+        return rest;
+      }
+
+      return {
+        ...prev,
+        [activeSettingsInstanceId]: settingsDraft.groupId,
+      };
+    });
+
+    closeSettingsModal();
+    onNotify({ tone: "success", title: t("instances.settings.saved") });
+  };
+
   const pushRecentError = (code: string, detail: string, context: string) => {
     const line = `${new Date().toISOString()} [${code}] ${context}: ${detail}`;
     recentErrorsRef.current = [...recentErrorsRef.current.slice(-39), line];
-  };
-
-  const retryDownloadTask = async (task: DownloadTaskView) => {
-    const instance = instances.find((item) => item.id === task.instanceId);
-    if (!instance) {
-      onNotify({ tone: "error", title: t("instances.retryFailed"), detail: t("instances.retryInstanceMissing", { name: task.instanceName }) });
-      return;
-    }
-
-    if (task.retryType === "java-runtime") {
-      await startInstance(instance);
-      return;
-    }
-
-    await downloadCore(instance, task.includeJava ?? true, t("instances.retryManualTask"));
   };
 
   const exportDiagnostics = async () => {
@@ -197,12 +621,11 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
 
     if (intent.type === "create") {
       setWizardOpen(true);
-      setDownloadCenterOpen(false);
       return;
     }
 
     if (intent.type === "downloads") {
-      setDownloadCenterOpen(true);
+      onOpenDownloadsView();
       setWizardOpen(false);
       return;
     }
@@ -212,8 +635,6 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
     }
 
     setWizardOpen(false);
-    setDownloadCenterOpen(false);
-
     let active = true;
 
     const openConsoleByIntent = async () => {
@@ -259,7 +680,7 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
         const payload = event.payload;
         setDownloadingId(payload.instanceId);
 
-        setDownloadTasks((prev) => {
+        onDownloadTasksChange((prev) => {
           const progressResult = applyDownloadProgress({
             prevTasks: prev,
             payload,
@@ -376,10 +797,10 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
         }
 
         setDownloadingId(instance.id);
-        setDownloadCenterOpen(true);
+        onOpenDownloadsView();
         speedSampleRef.current[instance.id] = { bytes: 0, at: Date.now() };
 
-        setDownloadTasks((prev) => {
+        onDownloadTasksChange((prev) => {
           const baseTask = createQueuedJavaTask(instance, locale, t);
           return upsertTask(prev, instance.id, baseTask);
         });
@@ -394,7 +815,7 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
                   title: t("instances.retryAuto", { task: t("instances.javaDownloadTask") }),
                   detail: t("instances.retryDetail", { name: instance.name, attempt: attempt + 1 }),
                 });
-                setDownloadTasks((prev) =>
+                onDownloadTasksChange((prev) =>
                   markTaskRetrying(
                     prev,
                     instance.id,
@@ -408,7 +829,7 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
           setMessage(t("instances.javaDownloadedMessage", { name: instance.name, path: javaPath }));
           onNotify({ tone: "success", title: t("instances.javaDownloaded"), detail: instance.name });
 
-          setDownloadTasks((prev) => markJavaTaskCompleted(prev, instance.id, javaPath, locale, t));
+          onDownloadTasksChange((prev) => markJavaTaskCompleted(prev, instance.id, javaPath, locale, t));
 
           await refreshInstances();
         } catch (javaError) {
@@ -417,7 +838,7 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
           pushRecentError(tagged.code, tagged.detail, `java-download ${instance.name}`);
           setMessage(t("instances.javaDownloadFailedMessage", { name: instance.name, error: javaErrorText }));
           onNotify({ tone: "error", title: t("instances.javaDownloadFailed"), detail: javaErrorText });
-          setDownloadTasks((prev) =>
+          onDownloadTasksChange((prev) =>
             markTaskFailed(
               prev,
               instance.id,
@@ -457,10 +878,10 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
     }
 
     setDownloadingId(instance.id);
-    setDownloadCenterOpen(true);
+    onOpenDownloadsView();
     speedSampleRef.current[instance.id] = { bytes: 0, at: Date.now() };
 
-    setDownloadTasks((prev) => {
+    onDownloadTasksChange((prev) => {
       const baseTask = createQueuedCoreTask(instance, includeJava, reason, locale, t);
       return upsertTask(prev, instance.id, baseTask);
     });
@@ -477,7 +898,7 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
               title: t("instances.retryAuto", { task: t("instances.coreDownloadTask") }),
               detail: t("instances.retryDetail", { name: instance.name, attempt: attempt + 1 }),
             });
-            setDownloadTasks((prev) =>
+            onDownloadTasksChange((prev) =>
               markTaskRetrying(
                 prev,
                 instance.id,
@@ -497,7 +918,7 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
       );
       onNotify({ tone: "success", title: t("instances.downloadDone"), detail: instance.name });
 
-      setDownloadTasks((prev) => markCoreTaskCompleted(prev, instance.id, result, locale, t));
+      onDownloadTasksChange((prev) => markCoreTaskCompleted(prev, instance.id, result, locale, t));
 
       await refreshInstances();
     } catch (error) {
@@ -506,7 +927,7 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
       pushRecentError(tagged.code, tagged.detail, `core-download ${instance.name}`);
       setMessage(t("instances.downloadFailedMessage", { name: instance.name, error: errorText }));
       onNotify({ tone: "error", title: t("instances.downloadFailed"), detail: errorText });
-      setDownloadTasks((prev) =>
+      onDownloadTasksChange((prev) =>
         markTaskFailed(
           prev,
           instance.id,
@@ -524,13 +945,20 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
 
   return (
     <>
-      <section className="panel page-panel">
+      <section className="panel page-panel instances-layout">
         <div className="panel-header">
           <div>
             <p className="panel-label">{t("instances.panelLabel")}</p>
             <h3>{t("instances.panelTitle")}</h3>
           </div>
           <div className="hero-actions">
+            <button
+              className={`ghost-action ${selectionMode ? "active" : ""}`}
+              type="button"
+              onClick={() => setSelectionMode((prev) => !prev)}
+            >
+              {selectionMode ? t("instances.bulk.exit") : t("instances.bulk.manage")}
+            </button>
             <button className="ghost-action" type="button" onClick={() => void exportDiagnostics()}>
               {t("instances.exportDiagnostics")}
             </button>
@@ -540,58 +968,253 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
           </div>
         </div>
 
-        <p className="instance-message">{loading ? t("instances.loading") : message || t("instances.defaultMessage")}</p>
-
-        <div className="server-list">
-          {instances.map((instance) => (
-            <article className="server-card" key={instance.id}>
-              <div className="server-main">
-                <div>
-                  <h4>{instance.name}</h4>
-                  <p>
-                    {instance.serverType} {instance.version}
-                  </p>
-                  <p className="instance-detail-line">
-                    <span className="status-pill warning">{t(getInstanceModeLabelKey(instance.creationMode))}</span>
-                    <span className="status-pill muted">{t(getInstanceGoalLabelKey(instance.serverGoal))}</span>
-                  </p>
-                </div>
-                <span className="status-pill muted">{t("instances.created")}</span>
+        <div className="instances-workspace">
+          <aside className="instances-side-nav" aria-label={t("instances.group.sidebarAria")}>
+            <article className="instances-group-create">
+              <div className="instances-group-create-head">
+                <strong>{t("instances.group.title")}</strong>
+                <button
+                  className="instances-group-add-btn"
+                  type="button"
+                  onClick={() => setGroupModalOpen(true)}
+                  aria-label={t("instances.group.createAction")}
+                  title={t("instances.group.createAction")}
+                >
+                  +
+                </button>
               </div>
+              <p>{t("instances.group.desc")}</p>
+            </article>
 
-              {instance.frameworkDescription && <p className="instance-message">{instance.frameworkDescription}</p>}
+            <div className="instances-group-list">
+              <button
+                className={`instances-group-item ${activeGroupFilter === "all" ? "active" : ""}`}
+                type="button"
+                onClick={() => setActiveGroupFilter("all")}
+              >
+                <span>{t("instances.group.all")}</span>
+                <span className="status-pill muted">{instances.length}</span>
+              </button>
 
-              <div className="server-meta">
-                <span>
-                  {t("instances.memory", { min: instance.minMemoryMb, max: instance.maxMemoryMb })}
+              <button
+                className={`instances-group-item ${activeGroupFilter === "ungrouped" ? "active" : ""}`}
+                type="button"
+                onClick={() => setActiveGroupFilter("ungrouped")}
+              >
+                <span>{t("instances.group.ungrouped")}</span>
+                <span className="status-pill muted">{ungroupedCount}</span>
+              </button>
+
+              <button
+                className={`instances-group-collapse ${customGroupsExpanded ? "expanded" : ""}`}
+                type="button"
+                onClick={() => setCustomGroupsExpanded((prev) => !prev)}
+              >
+                <span>{t("instances.group.customTitle")}</span>
+                <span className="instances-group-collapse-icon" aria-hidden="true">
+                  {customGroupsExpanded ? "-" : "+"}
                 </span>
-                <span>{instance.directory}</span>
-              </div>
+              </button>
 
-              <div className="server-actions">
-                <button className="chip-button" type="button" onClick={() => startInstance(instance)}>
-                  {t("instances.action.start")}
+              {customGroupsExpanded &&
+                groups.map((group) => {
+                  const count = instances.filter((instance) => instanceGroupMap[instance.id] === group.id).length;
+                  const checked = selectedGroupIds.includes(group.id);
+                  return (
+                    <div className="instances-group-item-wrap" key={group.id}>
+                      <button
+                        className={`instances-group-item ${activeGroupFilter === group.id ? "active" : ""}`}
+                        type="button"
+                        onClick={() => setActiveGroupFilter(group.id)}
+                      >
+                        <span className="instances-group-name">
+                          {selectionMode && (
+                            <input
+                              className="instances-select-checkbox"
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleGroupSelection(group.id)}
+                              onClick={(event) => event.stopPropagation()}
+                              aria-label={t("instances.bulk.selectGroupAria", { name: group.name })}
+                            />
+                          )}
+                          <span
+                            className="instances-group-dot"
+                            style={{ "--instance-group-accent": group.color } as CSSProperties}
+                            aria-hidden="true"
+                          />
+                          {group.name}
+                        </span>
+                        <span className="status-pill muted">{count}</span>
+                      </button>
+                      <div className="instances-group-item-actions">
+                        <button className="ghost-action" type="button" onClick={() => renameGroup(group)}>
+                          {t("instances.group.rename")}
+                        </button>
+                        <button className="ghost-action" type="button" onClick={() => deleteGroup(group)}>
+                          {t("instances.group.delete")}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </aside>
+
+          <div className="instances-content">
+            {selectionMode && (
+              <div className="instances-batch-toolbar">
+                <span className="status-pill muted">
+                  {t("instances.bulk.selectedInstances", { count: selectedInstanceIds.length })}
+                </span>
+                <span className="status-pill muted">
+                  {t("instances.bulk.selectedGroups", { count: selectedGroupIds.length })}
+                </span>
+                <button
+                  className="chip-button"
+                  type="button"
+                  onClick={() => setSelectedInstanceIds(displayedInstanceIds)}
+                >
+                  {t("instances.bulk.selectAllVisible", { count: displayedInstances.length })}
                 </button>
-                <button className="chip-button" type="button" onClick={() => setConsoleInstance(instance)}>
-                  {t("instances.action.console")}
+                <button
+                  className="ghost-action"
+                  type="button"
+                  onClick={() => {
+                    setSelectedInstanceIds([]);
+                    setSelectedGroupIds([]);
+                  }}
+                >
+                  {t("instances.bulk.clearSelection")}
                 </button>
-                <button className="chip-button" type="button" onClick={() => removeInstance(instance)}>
-                  {t("instances.action.delete")}
+                <label className="settings-field inline instances-bulk-move-field">
+                  <span>{t("instances.bulk.moveToGroup")}</span>
+                  <select value={bulkMoveTargetGroup} onChange={(event) => setBulkMoveTargetGroup(event.target.value)}>
+                    <option value="ungrouped">{t("instances.group.ungrouped")}</option>
+                    {groups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="ghost-action"
+                  type="button"
+                  onClick={batchMoveSelectedInstances}
+                  disabled={selectedInstanceIds.length === 0}
+                >
+                  {t("instances.bulk.applyMove")}
+                </button>
+                <button
+                  className="ghost-action"
+                  type="button"
+                  onClick={() => setBatchDeleteConfirmOpen(true)}
+                  disabled={selectedInstanceIds.length === 0 || bulkDeleting}
+                >
+                  {t("instances.bulk.deleteInstances")}
+                </button>
+                <button
+                  className="ghost-action"
+                  type="button"
+                  onClick={batchDeleteSelectedGroups}
+                  disabled={selectedGroupIds.length === 0}
+                >
+                  {t("instances.bulk.deleteGroups")}
                 </button>
               </div>
+            )}
 
-              {isCustomCoreInstance(instance) && !instance.coreDownloaded && (
-                <p className="instance-message">{t("instances.customCoreHint")}</p>
+            <p className="instance-message">{loading ? t("instances.loading") : message || t("instances.defaultMessage")}</p>
+
+            <div className="server-list">
+              {displayedInstances.map((instance) => {
+                const displayName = getDisplayName(instance);
+                const displayDescription = getDisplayDescription(instance);
+                const displayTags = getDisplayTags(instance);
+                const selected = selectedInstanceIds.includes(instance.id);
+
+                return (
+                <article className={`server-card ${selected ? "selected" : ""}`} key={instance.id}>
+                  <div className="server-main">
+                    <div>
+                      {selectionMode && (
+                        <label className="instance-card-select" onClick={(event) => event.stopPropagation()}>
+                          <input
+                            className="instances-select-checkbox"
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleInstanceSelection(instance.id)}
+                            aria-label={t("instances.bulk.selectInstanceAria", { name: displayName })}
+                          />
+                          <span>{t("instances.bulk.selectLabel")}</span>
+                        </label>
+                      )}
+                      <h4>{displayName}</h4>
+                      <p>
+                        {instance.serverType} {instance.version}
+                      </p>
+                      <p className="instance-detail-line">
+                        <span className="status-pill warning">{t(getInstanceModeLabelKey(instance.creationMode))}</span>
+                        <span className="status-pill muted">{t(getInstanceGoalLabelKey(instance.serverGoal))}</span>
+                      </p>
+                    </div>
+                    <span className="status-pill muted">{t("instances.created")}</span>
+                  </div>
+
+                  {displayDescription && <p className="instance-message">{displayDescription}</p>}
+
+                  {displayTags.length > 0 && (
+                    <p className="instance-detail-line">
+                      {displayTags.map((tag) => (
+                        <span className="status-pill muted" key={`${instance.id}-${tag}`}>
+                          #{tag}
+                        </span>
+                      ))}
+                    </p>
+                  )}
+
+                  <div className="server-meta">
+                    <span>
+                      {t("instances.memory", { min: instance.minMemoryMb, max: instance.maxMemoryMb })}
+                    </span>
+                    <span>{instance.directory}</span>
+                  </div>
+
+                  <div className="server-actions">
+                    <button className="chip-button" type="button" onClick={() => startInstance(instance)}>
+                      {t("instances.action.start")}
+                    </button>
+                    <button className="chip-button" type="button" onClick={() => setConsoleInstance(instance)}>
+                      {t("instances.action.console")}
+                    </button>
+                    <button
+                      className="chip-button"
+                      type="button"
+                      onClick={() => openSettingsModal(instance)}
+                    >
+                      {t("instances.action.settings")}
+                    </button>
+                    <button className="chip-button" type="button" onClick={() => removeInstance(instance)}>
+                      {t("instances.action.delete")}
+                    </button>
+                  </div>
+
+                  {isCustomCoreInstance(instance) && !instance.coreDownloaded && (
+                    <p className="instance-message">{t("instances.customCoreHint")}</p>
+                  )}
+                </article>
+                );
+              })}
+
+              {displayedInstances.length === 0 && !loading && (
+                <article className="server-card">
+                  <h4>{t("instances.empty.title")}</h4>
+                  <p>{t("instances.group.emptyByFilter")}</p>
+                </article>
               )}
-            </article>
-          ))}
-
-          {instances.length === 0 && !loading && (
-            <article className="server-card">
-              <h4>{t("instances.empty.title")}</h4>
-              <p>{t("instances.empty.desc")}</p>
-            </article>
-          )}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -600,16 +1223,6 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
         defaultName={`Server-${instances.length + 1}`}
         onClose={() => setWizardOpen(false)}
         onSubmit={createInstance}
-      />
-
-      <DownloadCenter
-        open={downloadCenterOpen}
-        tasks={downloadTasks}
-        onToggleOpen={() => setDownloadCenterOpen((prev) => !prev)}
-        onClose={() => setDownloadCenterOpen(false)}
-        onRetryTask={(task) => {
-          void retryDownloadTask(task);
-        }}
       />
 
       <InstanceConsole
@@ -638,6 +1251,159 @@ export function InstancesPage({ intent, onNotify }: InstancesPageProps) {
         onConfirm={() => resolveDeletePrompt(true)}
         onCancel={() => resolveDeletePrompt(false)}
       />
+
+      {batchDeleteConfirmOpen && (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("instances.bulk.deleteInstancesConfirmTitle")}
+        >
+          <section className="wizard-modal instance-group-modal">
+            <div className="wizard-header">
+              <div>
+                <p className="panel-label">{t("instances.bulk.deleteInstances")}</p>
+                <h3>{t("instances.bulk.deleteInstancesConfirmTitle")}</h3>
+              </div>
+            </div>
+            <div className="wizard-step compact">
+              <p className="instance-message">
+                {t("instances.bulk.deleteInstancesConfirmDetail", { count: selectedInstanceIds.length })}
+              </p>
+            </div>
+            <div className="wizard-actions">
+              <button className="ghost-action" type="button" onClick={() => setBatchDeleteConfirmOpen(false)}>
+                {t("instances.group.cancel")}
+              </button>
+              <button
+                className="primary-action"
+                type="button"
+                onClick={() => void batchDeleteSelectedInstances()}
+                disabled={selectedInstanceIds.length === 0 || bulkDeleting}
+              >
+                {t("instances.bulk.deleteInstances")}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {activeSettingsInstanceId && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label={t("instances.action.settings")}>
+          <section className="wizard-modal instance-settings-modal">
+            <div className="wizard-header">
+              <div>
+                <p className="panel-label">{t("instances.panelLabel")}</p>
+                <h3>{t("instances.action.settings")}</h3>
+              </div>
+            </div>
+
+            {(() => {
+              const hasTarget = instances.some((item) => item.id === activeSettingsInstanceId);
+              if (!hasTarget || !settingsDraft) {
+                return null;
+              }
+
+              return (
+                <div className="wizard-step compact instance-settings-modal-grid">
+                  <label className="wizard-field">
+                    <span>{t("instances.settings.name")}</span>
+                    <input
+                      type="text"
+                      value={settingsDraft.name}
+                      onChange={(event) =>
+                        setSettingsDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))
+                      }
+                    />
+                  </label>
+                  <label className="wizard-field">
+                    <span>{t("instances.settings.description")}</span>
+                    <input
+                      type="text"
+                      value={settingsDraft.description}
+                      onChange={(event) =>
+                        setSettingsDraft((prev) => (prev ? { ...prev, description: event.target.value } : prev))
+                      }
+                    />
+                  </label>
+                  <label className="wizard-field">
+                    <span>{t("instances.settings.tags")}</span>
+                    <input
+                      type="text"
+                      value={settingsDraft.tags}
+                      placeholder={t("instances.settings.tagsPlaceholder")}
+                      onChange={(event) =>
+                        setSettingsDraft((prev) => (prev ? { ...prev, tags: event.target.value } : prev))
+                      }
+                    />
+                  </label>
+                  <label className="wizard-field inline instance-group-assign">
+                    <span>{t("instances.group.assign")}</span>
+                    <select
+                      value={settingsDraft.groupId}
+                      onChange={(event) =>
+                        setSettingsDraft((prev) => (prev ? { ...prev, groupId: event.target.value } : prev))
+                      }
+                    >
+                      <option value="ungrouped">{t("instances.group.ungrouped")}</option>
+                      {groups.map((group) => (
+                        <option key={group.id} value={group.id}>
+                          {group.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              );
+            })()}
+
+            <div className="wizard-actions">
+              <button className="ghost-action" type="button" onClick={closeSettingsModal}>
+                {t("instances.group.cancel")}
+              </button>
+              <button className="primary-action" type="button" onClick={saveSettingsModal} disabled={!settingsDraft}>
+                {t("instances.settings.save")}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {groupModalOpen && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label={t("instances.group.createModalTitle")}>
+          <section className="wizard-modal instance-group-modal">
+            <div className="wizard-header">
+              <div>
+                <p className="panel-label">{t("instances.group.title")}</p>
+                <h3>{t("instances.group.createModalTitle")}</h3>
+              </div>
+            </div>
+            <div className="wizard-step compact">
+              <label className="wizard-field">
+                <span>{t("instances.group.nameLabel")}</span>
+                <input
+                  type="text"
+                  value={groupNameInput}
+                  onChange={(event) => setGroupNameInput(event.target.value)}
+                  placeholder={t("instances.group.createPlaceholder")}
+                />
+              </label>
+              <label className="wizard-field">
+                <span>{t("instances.group.colorLabel")}</span>
+                <input type="color" value={groupColorInput} onChange={(event) => setGroupColorInput(event.target.value)} />
+              </label>
+            </div>
+            <div className="wizard-actions">
+              <button className="ghost-action" type="button" onClick={() => setGroupModalOpen(false)}>
+                {t("instances.group.cancel")}
+              </button>
+              <button className="primary-action" type="button" onClick={addGroup} disabled={!groupNameInput.trim()}>
+                {t("instances.group.createConfirm")}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </>
   );
 }

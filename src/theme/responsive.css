@@ -11,8 +11,12 @@
     grid-template-columns: 1fr;
   }
 
+  .home-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
   .resource-gauge-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .hero h2 {
@@ -50,8 +54,8 @@
   }
 
   .topbar {
-    flex-wrap: wrap;
-    align-items: flex-start;
+    grid-template-columns: 1fr;
+    align-items: stretch;
     gap: 10px;
   }
 
@@ -59,6 +63,16 @@
   .topbar-right {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .topbar-center {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .topbar-center .tab-nav {
+    width: 100%;
+    max-width: none;
   }
 
   .topbar-left {
@@ -69,8 +83,18 @@
     grid-template-columns: 1fr;
   }
 
+  .instances-workspace,
+  .market-workspace {
+    grid-template-columns: 1fr;
+  }
+
   .settings-side-nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    position: static;
+  }
+
+  .instances-side-nav,
+  .market-side-nav {
     position: static;
   }
 
@@ -78,6 +102,17 @@
     max-height: none;
     overflow: visible;
     padding-right: 0;
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid color-mix(in srgb, var(--surface-border) 74%, rgba(var(--theme-accent-rgb), 0.28));
+    padding-top: 14px;
+  }
+
+  .instances-content {
+    border-left: 0;
+    border-top: 1px solid color-mix(in srgb, var(--surface-border) 74%, rgba(var(--theme-accent-rgb), 0.28));
+    padding-left: 0;
+    padding-top: 14px;
   }
 }
 
@@ -94,6 +129,7 @@
   }
 
   .settings-side-nav,
+  .instances-group-create-row,
   .settings-form-grid.two-column,
   .settings-about-grid {
     grid-template-columns: 1fr;
@@ -108,7 +144,7 @@
   }
 
   .topbar-actions,
-  .tab-nav {
+  .topbar-center .tab-nav {
     width: 100%;
     flex-wrap: wrap;
   }
@@ -117,8 +153,16 @@
     width: auto;
   }
 
+  .topbar-quick-controls {
+    order: 1;
+  }
+
   .window-controls.native {
     margin-left: auto;
+  }
+
+  .topbar-language-button span {
+    display: none;
   }
 
   .topbar {

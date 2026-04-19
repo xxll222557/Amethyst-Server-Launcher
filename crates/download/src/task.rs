@@ -246,6 +246,102 @@ where
     })
 }
 
+pub fn download_url_to_path_with_progress<F>(
+    instance_id: &str,
+    item: &str,
+    source_url: &str,
+    output_path: &Path,
+    message: &str,
+    mut on_progress: F,
+) -> DownloadTaskResult<u64>
+where
+    F: FnMut(DownloadProgress),
+{
+    let client = Client::builder()
+        .user_agent("amethyst-server-launcher/0.1")
+        .build()
+        .map_err(|err| format_error("failed to build http client", err))?;
+
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| format_error("failed to ensure output parent dir", err))?;
+    }
+
+    let (total_size, supports_range) = probe_download_capabilities(&client, source_url);
+
+    on_progress(DownloadProgress {
+        instance_id: instance_id.to_string(),
+        item: item.to_string(),
+        downloaded_bytes: 0,
+        total_bytes: total_size,
+        percent: 0.0,
+        bytes_per_second: 0.0,
+        status: "starting".to_string(),
+        message: Some(message.to_string()),
+    });
+
+    let bytes_written = if supports_range {
+        if let Some(length) = total_size {
+            if length >= 10 * 1024 * 1024 {
+                parallel_download(
+                    &client,
+                    instance_id,
+                    item,
+                    source_url,
+                    output_path,
+                    length,
+                    &mut on_progress,
+                )?
+            } else {
+                single_download(
+                    &client,
+                    instance_id,
+                    item,
+                    source_url,
+                    output_path,
+                    total_size,
+                    message,
+                    &mut on_progress,
+                )?
+            }
+        } else {
+            single_download(
+                &client,
+                instance_id,
+                item,
+                source_url,
+                output_path,
+                total_size,
+                message,
+                &mut on_progress,
+            )?
+        }
+    } else {
+        single_download(
+            &client,
+            instance_id,
+            item,
+            source_url,
+            output_path,
+            total_size,
+            message,
+            &mut on_progress,
+        )?
+    };
+
+    on_progress(DownloadProgress {
+        instance_id: instance_id.to_string(),
+        item: item.to_string(),
+        downloaded_bytes: bytes_written,
+        total_bytes: total_size,
+        percent: 100.0,
+        bytes_per_second: 0.0,
+        status: "completed".to_string(),
+        message: Some(format!("下载完成: {}", output_path.display())),
+    });
+
+    Ok(bytes_written)
+}
+
 fn single_download<F>(
     client: &Client,
     instance_id: &str,

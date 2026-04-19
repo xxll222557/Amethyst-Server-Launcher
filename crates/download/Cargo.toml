@@ -11,3 +11,5 @@ flate2 = "1"
 tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 walkdir = "2"
+launcher_data = { path = "../data" }
+tauri = { version = "2", features = [] }

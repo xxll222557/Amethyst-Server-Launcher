@@ -44,6 +44,9 @@ export function SystemResourcePanel({ snapshot, refreshIntervalMs, onRefreshInte
     },
   ];
 
+  const downloadText = snapshot ? formatBytes(snapshot.networkDownloadBps) : "--";
+  const uploadText = snapshot ? formatBytes(snapshot.networkUploadBps) : "--";
+
   return (
     <section className="panel resource-panel">
       <div className="panel-header">
@@ -109,6 +112,17 @@ export function SystemResourcePanel({ snapshot, refreshIntervalMs, onRefreshInte
             </article>
           );
         })}
+      </div>
+
+      <div className="resource-network-row" aria-label={t("resource.network")}> 
+        <span className="resource-network-pill">
+          <strong>{t("resource.network.download")}</strong>
+          {`${downloadText}/s`}
+        </span>
+        <span className="resource-network-pill">
+          <strong>{t("resource.network.upload")}</strong>
+          {`${uploadText}/s`}
+        </span>
       </div>
     </section>
   );
