@@ -1,0 +1,97 @@
+name: Build And Publish Pre-release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  create-prerelease:
+    name: Create pre-release
+    runs-on: ubuntu-latest
+
+    outputs:
+      release_tag: ${{ steps.release-meta.outputs.release_tag }}
+      release_name: ${{ steps.release-meta.outputs.release_name }}
+
+    steps:
+      - name: Prepare release metadata
+        id: release-meta
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          build_time="$(date -u +'%Y-%m-%d %H:%M UTC')"
+          echo "release_tag=pre-release-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "release_name=Pre-release ${build_time} (${short_sha})" >> "$GITHUB_OUTPUT"
+
+      - name: Create pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release-meta.outputs.release_tag }}
+          name: ${{ steps.release-meta.outputs.release_name }}
+          prerelease: true
+          draft: false
+          body: |
+            Automated pre-release build for commit ${{ github.sha }}.
+            Triggered by workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+  build-and-release:
+    name: Build (${{ matrix.platform.name }}) and upload assets
+    needs: create-prerelease
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: macOS
+            runner: macos-latest
+          - name: Windows
+            runner: windows-latest
+          - name: Linux
+            runner: ubuntu-22.04
+    runs-on: ${{ matrix.platform.runner }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies
+        if: matrix.platform.runner == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Build and publish pre-release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ needs.create-prerelease.outputs.release_tag }}
+          releaseName: ${{ needs.create-prerelease.outputs.release_name }}
+          releaseBody: |
+            Automated pre-release build for commit ${{ github.sha }}.
+            Triggered by workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          releaseDraft: false
+          prerelease: true
