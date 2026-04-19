@@ -3,12 +3,11 @@ pub mod tauri_app;
 use std::path::PathBuf;
 
 pub fn backend_data_dir() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| "failed to resolve HOME for application data dir".to_string())?;
-
     #[cfg(target_os = "macos")]
     {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or_else(|| "failed to resolve HOME for application data dir".to_string())?;
         return Ok(home
             .join("Library")
             .join("Application Support")
@@ -20,6 +19,11 @@ pub fn backend_data_dir() -> Result<PathBuf, String> {
         if let Some(app_data) = std::env::var_os("APPDATA") {
             return Ok(PathBuf::from(app_data).join("Amethyst-Server-Launcher"));
         }
+
+        let home = std::env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+            .ok_or_else(|| "failed to resolve USERPROFILE for application data dir".to_string())?;
         return Ok(home
             .join("AppData")
             .join("Roaming")
@@ -28,6 +32,10 @@ pub fn backend_data_dir() -> Result<PathBuf, String> {
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or_else(|| "failed to resolve HOME for application data dir".to_string())?;
+
         if let Some(xdg_data_home) = std::env::var_os("XDG_DATA_HOME") {
             return Ok(PathBuf::from(xdg_data_home).join("amethyst-server-launcher"));
         }

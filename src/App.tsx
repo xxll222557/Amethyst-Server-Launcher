@@ -361,10 +361,13 @@ function resolveBackgroundLayers(
 
 function App() {
   const { t } = useI18n();
+  const platform = useMemo(() => detectPlatform(), []);
   const [activeView, setActiveView] = useState<AppView>("home");
   const [instanceViewIntent, setInstanceViewIntent] = useState<InstanceViewIntent>({ type: "none", nonce: 0 });
   const [toasts, setToasts] = useState<ToastItem[]>([]);
-  const [resourceRefreshIntervalMs, setResourceRefreshIntervalMs] = useState(2000);
+  const [resourceRefreshIntervalMs, setResourceRefreshIntervalMs] = useState(
+    platform === "windows" ? 3500 : 2000,
+  );
   const [downloadTasks, setDownloadTasks] = useState<DownloadTaskView[]>(() =>
     parseStoredDownloadTasks(window.localStorage.getItem(DOWNLOAD_TASKS_STORAGE_KEY)),
   );
@@ -377,7 +380,6 @@ function App() {
     direction: "forward" | "backward";
   } | null>(null);
   const systemResources = useSystemResourceMonitor(resourceRefreshIntervalMs);
-  const platform = useMemo(() => detectPlatform(), []);
 
   useEffect(() => {
     const dismissed = window.localStorage.getItem(FIRST_RUN_GUIDE_DISMISSED_KEY) === "1";
@@ -475,6 +477,13 @@ function App() {
     appSettings.personalization.backgroundImageUrl,
     appSettings.personalization.themeColor,
   ]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle("platform-windows", platform === "windows");
+    root.classList.toggle("platform-macos", platform === "macos");
+    root.classList.toggle("platform-linux", platform === "linux");
+  }, [platform]);
 
   const viewOrder: Record<AppView, number> = {
     home: 0,
@@ -605,6 +614,12 @@ function App() {
 
   const changeActiveView = (nextView: AppView) => {
     if (nextView === activeView) {
+      return;
+    }
+
+    if (platform === "windows") {
+      setViewTransition(null);
+      setActiveView(nextView);
       return;
     }
 
@@ -806,7 +821,7 @@ function App() {
         />
 
         <div className="view-frame">
-          {viewTransition && (
+          {platform !== "windows" && viewTransition && (
             <div className={`view-panel outgoing ${viewTransition.direction}`} key={`out-${viewTransition.from}`}>
               {renderView(viewTransition.from)}
             </div>

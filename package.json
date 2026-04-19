@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "check:rust": "cd src-tauri && cargo check",
     "check:mvp": "pnpm build && pnpm check:rust",
+    "smoke:mvp": "bash ./scripts/mvp-smoke.sh",
     "bundle:mvp": "pnpm check:mvp && pnpm tauri build",
     "preview": "vite preview",
     "tauri": "tauri"

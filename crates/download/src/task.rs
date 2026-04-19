@@ -7,7 +7,29 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
+
+struct LockFileGuard {
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JavaRuntimeReadyMarker {
+    java_major: u32,
+    executable_path: String,
+    generated_at_unix: u64,
+}
+
+enum JavaLockOutcome {
+    Acquired(LockFileGuard),
+    Reused(PathBuf),
+}
+
+impl Drop for LockFileGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,8 +75,23 @@ pub fn download_java_runtime_with_progress<F>(
 where
     F: FnMut(DownloadProgress),
 {
-    let java_root = instance_dir.join("runtime").join("java");
-    if let Some(existing) = find_java_executable(&java_root) {
+    let runtime_dir = instance_dir.join("runtime");
+    download_java_runtime_with_progress_in(instance_id, &runtime_dir, mc_version, |progress| {
+        on_progress(progress);
+    })
+}
+
+pub fn download_java_runtime_with_progress_in<F>(
+    instance_id: &str,
+    runtime_dir: &Path,
+    mc_version: &str,
+    mut on_progress: F,
+) -> DownloadTaskResult<PathBuf>
+where
+    F: FnMut(DownloadProgress),
+{
+    let java_root = runtime_dir.join("java");
+    if let Some(existing) = resolve_ready_java_executable(runtime_dir, &java_root) {
         on_progress(DownloadProgress {
             instance_id: instance_id.to_string(),
             item: "java-runtime".to_string(),
@@ -64,6 +101,71 @@ where
             bytes_per_second: 0.0,
             status: "completed".to_string(),
             message: Some(format!("复用现有 Java 运行时: {}", existing.display())),
+        });
+        return Ok(existing);
+    }
+
+    if let Some(existing) = find_java_executable(&java_root) {
+        write_java_ready_marker(runtime_dir, &existing, recommended_java_major(mc_version))?;
+        on_progress(DownloadProgress {
+            instance_id: instance_id.to_string(),
+            item: "java-runtime".to_string(),
+            downloaded_bytes: 1,
+            total_bytes: Some(1),
+            percent: 100.0,
+            bytes_per_second: 0.0,
+            status: "completed".to_string(),
+            message: Some(format!("复用现有 Java 运行时: {}", existing.display())),
+        });
+        return Ok(existing);
+    }
+
+    fs::create_dir_all(runtime_dir).map_err(|err| format_error("failed to create runtime dir", err))?;
+
+    let lock_path = runtime_dir.join(".asl-java-install.lock");
+    let _lock_guard = match acquire_java_runtime_lock(instance_id, &java_root, &lock_path, &mut on_progress)? {
+        JavaLockOutcome::Acquired(guard) => Some(guard),
+        JavaLockOutcome::Reused(path) => {
+            on_progress(DownloadProgress {
+                instance_id: instance_id.to_string(),
+                item: "java-runtime".to_string(),
+                downloaded_bytes: 1,
+                total_bytes: Some(1),
+                percent: 100.0,
+                bytes_per_second: 0.0,
+                status: "completed".to_string(),
+                message: Some(format!("复用已准备的 Java 运行时: {}", path.display())),
+            });
+            return Ok(path);
+        }
+    };
+
+    // Re-check after acquiring lock so waiting callers can reuse the first completed download.
+    if let Some(existing) = resolve_ready_java_executable(runtime_dir, &java_root) {
+        on_progress(DownloadProgress {
+            instance_id: instance_id.to_string(),
+            item: "java-runtime".to_string(),
+            downloaded_bytes: 1,
+            total_bytes: Some(1),
+            percent: 100.0,
+            bytes_per_second: 0.0,
+            status: "completed".to_string(),
+            message: Some(format!("复用已准备的 Java 运行时: {}", existing.display())),
+        });
+        return Ok(existing);
+    }
+
+    if let Some(existing) = find_java_executable(&java_root) {
+        write_java_ready_marker(runtime_dir, &existing, recommended_java_major(mc_version))?;
+        on_progress(DownloadProgress {
+            instance_id: instance_id.to_string(),
+            item: "java-runtime".to_string(),
+            downloaded_bytes: 1,
+            total_bytes: Some(1),
+            percent: 100.0,
+            bytes_per_second: 0.0,
+            status: "completed".to_string(),
+            message: Some(format!("复用已准备的 Java 运行时: {}", existing.display())),
         });
         return Ok(existing);
     }
@@ -85,7 +187,8 @@ where
         message: Some(format!("启动前自动下载 Java {java_major} 运行时")),
     });
 
-    let java_exec = download_java_runtime(&client, instance_id, instance_dir, java_major, &mut on_progress)?;
+    let java_exec = download_java_runtime(&client, instance_id, runtime_dir, java_major, &mut on_progress)?;
+    write_java_ready_marker(runtime_dir, &java_exec, java_major)?;
 
     on_progress(DownloadProgress {
         instance_id: instance_id.to_string(),
@@ -99,6 +202,74 @@ where
     });
 
     Ok(java_exec)
+}
+
+fn acquire_java_runtime_lock<F>(
+    instance_id: &str,
+    java_root: &Path,
+    lock_path: &Path,
+    on_progress: &mut F,
+) -> DownloadTaskResult<JavaLockOutcome>
+where
+    F: FnMut(DownloadProgress),
+{
+    let deadline = Instant::now() + Duration::from_secs(8 * 60);
+    let mut next_wait_notice = Instant::now();
+
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(lock_path)
+        {
+            Ok(_) => {
+                return Ok(JavaLockOutcome::Acquired(LockFileGuard {
+                    path: lock_path.to_path_buf(),
+                }))
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                if let Ok(metadata) = fs::metadata(lock_path) {
+                    if let Ok(modified) = metadata.modified() {
+                        if let Ok(age) = SystemTime::now().duration_since(modified) {
+                            if age > Duration::from_secs(30 * 60) {
+                                let _ = fs::remove_file(lock_path);
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                if let Some(existing) = resolve_ready_java_executable(
+                    lock_path.parent().unwrap_or(java_root),
+                    java_root,
+                ) {
+                    return Ok(JavaLockOutcome::Reused(existing));
+                }
+
+                let now = Instant::now();
+                if now >= deadline {
+                    return Err("java runtime lock wait timeout, please retry".to_string());
+                }
+
+                if now >= next_wait_notice {
+                    on_progress(DownloadProgress {
+                        instance_id: instance_id.to_string(),
+                        item: "java-runtime".to_string(),
+                        downloaded_bytes: 0,
+                        total_bytes: None,
+                        percent: 0.0,
+                        bytes_per_second: 0.0,
+                        status: "waiting".to_string(),
+                        message: Some("等待其他任务完成 Java 运行时准备".to_string()),
+                    });
+                    next_wait_notice = now + Duration::from_secs(3);
+                }
+
+                thread::sleep(Duration::from_millis(300));
+            }
+            Err(err) => return Err(format_error("failed to create java runtime lock", err)),
+        }
+    }
 }
 
 pub fn download_server_core_with_progress<F>(
@@ -663,7 +834,7 @@ fn download_range_part(
 fn download_java_runtime<F>(
     client: &Client,
     instance_id: &str,
-    instance_dir: &Path,
+    runtime_dir: &Path,
     java_major: u32,
     on_progress: &mut F,
 ) -> DownloadTaskResult<PathBuf>
@@ -689,7 +860,6 @@ where
         "https://api.adoptium.net/v3/binary/latest/{java_major}/ga/{os}/{arch}/jdk/hotspot/normal/eclipse"
     );
 
-    let runtime_dir = instance_dir.join("runtime");
     fs::create_dir_all(&runtime_dir).map_err(|err| format_error("failed to create runtime dir", err))?;
 
     let archive_path = runtime_dir.join(format!("java-runtime.{ext}"));
@@ -716,6 +886,7 @@ where
     });
 
     let java_root = runtime_dir.join("java");
+    let _ = fs::remove_file(runtime_dir.join(".asl-java-ready.json"));
     if java_root.exists() {
         fs::remove_dir_all(&java_root).map_err(|err| format_error("failed to cleanup old java runtime", err))?;
     }
@@ -806,7 +977,43 @@ fn find_java_executable(root: &Path) -> Option<PathBuf> {
     None
 }
 
-fn recommended_java_major(mc_version: &str) -> u32 {
+fn resolve_ready_java_executable(runtime_dir: &Path, java_root: &Path) -> Option<PathBuf> {
+    let marker_path = runtime_dir.join(".asl-java-ready.json");
+    let marker_raw = fs::read_to_string(&marker_path).ok()?;
+    let marker = serde_json::from_str::<JavaRuntimeReadyMarker>(&marker_raw).ok()?;
+
+    let candidate = PathBuf::from(&marker.executable_path);
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+
+    // Marker exists but executable is missing; cleanup stale marker and broken java directory.
+    let _ = fs::remove_file(&marker_path);
+    if java_root.exists() && find_java_executable(java_root).is_none() {
+        let _ = fs::remove_dir_all(java_root);
+    }
+
+    None
+}
+
+fn write_java_ready_marker(runtime_dir: &Path, java_exec: &Path, java_major: u32) -> DownloadTaskResult<()> {
+    let marker = JavaRuntimeReadyMarker {
+        java_major,
+        executable_path: java_exec.to_string_lossy().to_string(),
+        generated_at_unix: SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default(),
+    };
+
+    let marker_path = runtime_dir.join(".asl-java-ready.json");
+    let payload = serde_json::to_string_pretty(&marker)
+        .map_err(|err| format!("failed to serialize java ready marker: {err}"))?;
+    fs::write(marker_path, payload).map_err(|err| format_error("failed to write java ready marker", err))?;
+    Ok(())
+}
+
+pub fn recommended_java_major(mc_version: &str) -> u32 {
     let (major, minor, patch) = parse_mc_version(mc_version);
     if major > 1 || (major == 1 && (minor > 20 || (minor == 20 && patch >= 5))) {
         return 21;

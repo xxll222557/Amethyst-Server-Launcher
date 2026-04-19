@@ -760,7 +760,7 @@ export function InstanceConsole({ open, instance, onClose, onUpdated }: Instance
         open={javaPromptOpen}
         instanceName={instance.name}
         recommendedJavaMajor={recommendedJavaMajorFromMcVersion(instance.version)}
-        installDirectory={javaInstallDirectory(instance.directory)}
+        installDirectory={javaInstallDirectory(instance.version)}
         reason={javaPromptReason || undefined}
         onConfirm={() => resolveJavaPrompt(true)}
         onCancel={() => resolveJavaPrompt(false)}

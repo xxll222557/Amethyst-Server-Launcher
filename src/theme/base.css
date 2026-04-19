@@ -149,3 +149,23 @@ button {
   margin: 0;
   color: var(--text-secondary);
 }
+
+:root.platform-windows .topbar,
+:root.platform-windows .hero,
+:root.platform-windows .modal-overlay {
+  backdrop-filter: none !important;
+}
+
+:root.platform-windows .view-panel,
+:root.platform-windows .tab-button,
+:root.platform-windows .server-card,
+:root.platform-windows .chip-button,
+:root.platform-windows .settings-side-item,
+:root.platform-windows .market-side-item,
+:root.platform-windows .downloads-side-item,
+:root.platform-windows .instance-console-tab-indicator,
+:root.platform-windows .home-filter-indicator,
+:root.platform-windows .tab-active-indicator {
+  transition-duration: 120ms !important;
+  animation-duration: 120ms !important;
+}

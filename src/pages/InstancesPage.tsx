@@ -1238,7 +1238,7 @@ export function InstancesPage({
         open={Boolean(javaPromptInstance)}
         instanceName={javaPromptInstance?.name ?? t("instances.panelLabel")}
         recommendedJavaMajor={recommendedJavaMajorFromMcVersion(javaPromptInstance?.version ?? "1.21.4")}
-        installDirectory={javaInstallDirectory(javaPromptInstance?.directory ?? "")}
+        installDirectory={javaInstallDirectory(javaPromptInstance?.version ?? "1.21.4")}
         reason={javaPromptReason || undefined}
         onConfirm={() => resolveJavaPrompt(true)}
         onCancel={() => resolveJavaPrompt(false)}

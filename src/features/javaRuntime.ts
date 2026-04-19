@@ -13,7 +13,7 @@ export function recommendedJavaMajorFromMcVersion(version: string): number {
   return 8;
 }
 
-export function javaInstallDirectory(instanceDirectory: string): string {
-  const normalized = instanceDirectory.replace(/\\/g, "/").replace(/\/$/, "");
-  return `${normalized}/runtime/java`;
+export function javaInstallDirectory(mcVersion: string): string {
+  const major = recommendedJavaMajorFromMcVersion(mcVersion);
+  return `AppData/runtime/shared-java/java-${major}`;
 }

@@ -127,10 +127,95 @@ fn resolve_java_executable(instance: &InstanceConfig, instance_dir: &Path) -> Re
         }
     }
 
+    if let Some(shared_runtime_root) = shared_java_runtime_dir_for_version(&instance.version) {
+        if let Some(found) = find_java_in_dir(&shared_runtime_root, 0) {
+            return Ok(found);
+        }
+    }
+
     Err(format!(
         "E_JAVA_NOT_FOUND::Java executable was not found. Set an absolute Java path in Instance Console, or download Java to {}/runtime/java",
         instance_dir.display(),
     ))
+}
+
+fn shared_java_runtime_dir_for_version(mc_version: &str) -> Option<PathBuf> {
+    if let Some(raw) = std::env::var_os("ASL_JAVA_RUNTIME_DIR") {
+        let configured = PathBuf::from(raw);
+        if configured.is_absolute() {
+            return Some(configured.join(format!("java-{}", recommended_java_major(mc_version))));
+        }
+    }
+
+    let data_dir = launcher_data_dir().ok()?;
+    Some(
+        data_dir
+            .join("runtime")
+            .join("shared-java")
+            .join(format!("java-{}", recommended_java_major(mc_version))),
+    )
+}
+
+fn launcher_data_dir() -> Result<PathBuf, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or_else(|| "failed to resolve HOME for application data dir".to_string())?;
+        return Ok(home
+            .join("Library")
+            .join("Application Support")
+            .join("Amethyst-Server-Launcher"));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(app_data) = std::env::var_os("APPDATA") {
+            return Ok(PathBuf::from(app_data).join("Amethyst-Server-Launcher"));
+        }
+
+        let home = std::env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+            .ok_or_else(|| "failed to resolve USERPROFILE for application data dir".to_string())?;
+
+        return Ok(home
+            .join("AppData")
+            .join("Roaming")
+            .join("Amethyst-Server-Launcher"));
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or_else(|| "failed to resolve HOME for application data dir".to_string())?;
+
+        if let Some(xdg_data_home) = std::env::var_os("XDG_DATA_HOME") {
+            return Ok(PathBuf::from(xdg_data_home).join("amethyst-server-launcher"));
+        }
+
+        Ok(home.join(".local").join("share").join("amethyst-server-launcher"))
+    }
+}
+
+fn recommended_java_major(mc_version: &str) -> u32 {
+    let (major, minor, patch) = parse_mc_version(mc_version);
+    if major > 1 || (major == 1 && (minor > 20 || (minor == 20 && patch >= 5))) {
+        return 21;
+    }
+    if major == 1 && minor >= 18 {
+        return 17;
+    }
+    8
+}
+
+fn parse_mc_version(version: &str) -> (u32, u32, u32) {
+    let mut parts = version.split('.');
+    let major = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(1);
+    let minor = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(20);
+    let patch = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+    (major, minor, patch)
 }
 
 fn find_java_in_dir(dir: &Path, depth: usize) -> Option<PathBuf> {

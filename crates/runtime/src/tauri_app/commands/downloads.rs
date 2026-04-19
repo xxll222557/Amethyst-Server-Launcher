@@ -13,7 +13,7 @@ pub async fn download_instance_java_runtime(
     let dir = backend_data_dir()?;
     let instance = get_instance(&dir, &instance_id)?;
 
-    let java_path = download_java_runtime_for_instance(app, instance).await?;
+    let java_path = download_java_runtime_for_instance(app, instance, &dir).await?;
     let _ = update_instance_java_path(&dir, &instance_id, Some(java_path.clone()));
     Ok(java_path)
 }
@@ -27,7 +27,7 @@ pub async fn download_instance_core(
     let dir = backend_data_dir()?;
     let instance = get_instance(&dir, &instance_id)?;
 
-    let result = download_core_for_instance(app, instance, include_java).await?;
+    let result = download_core_for_instance(app, instance, &dir, include_java).await?;
 
     if let Some(java_path) = result.java_executable_path.clone() {
         let _ = update_instance_java_path(&dir, &instance_id, Some(java_path));
