@@ -33,6 +33,18 @@ pub struct InstanceProcessEvent {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstanceCrashAnalysisEvent {
+    pub instance_id: String,
+    pub crash_code: String,
+    pub summary: String,
+    pub detail: String,
+    pub confidence: u8,
+    pub suggestions: Vec<String>,
+    pub log_excerpt: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstanceJavaRuntimeStatus {
@@ -284,6 +296,7 @@ pub fn start_instance_server_managed(
     instance: &InstanceConfig,
     on_console_log: Arc<dyn Fn(InstanceConsoleLogEvent) + Send + Sync + 'static>,
     on_process_state: Arc<dyn Fn(InstanceProcessEvent) + Send + Sync + 'static>,
+    on_crash_analysis: Arc<dyn Fn(InstanceCrashAnalysisEvent) + Send + Sync + 'static>,
 ) -> Result<LaunchResult, String> {
     ensure_instance_not_locked(instance)?;
 
@@ -312,6 +325,7 @@ pub fn start_instance_server_managed(
 
     let mut spawned = spawn_instance(instance, true)?;
     let instance_key = instance.id.clone();
+    let instance_dir = instance.directory.clone();
 
     if let Some(stdout) = spawned.child.stdout.take() {
         let id = instance_key.clone();
@@ -359,7 +373,9 @@ pub fn start_instance_server_managed(
     }
 
     let monitor_state = Arc::clone(&process_state.processes);
+    let monitor_logs = Arc::clone(&process_state.logs);
     let on_process_state_emit = Arc::clone(&on_process_state);
+    let on_crash_analysis_emit = Arc::clone(&on_crash_analysis);
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(700));
         let mut should_break = false;
@@ -374,6 +390,20 @@ pub fn start_instance_server_managed(
                             status: "stopped".to_string(),
                             message: format!("Instance process exited: {status}"),
                         });
+                        // Give IO reader threads a brief window to flush tail logs for short-lived crashes.
+                        std::thread::sleep(Duration::from_millis(220));
+                        let recent_logs = read_recent_logs(&monitor_logs, &instance_key, 240);
+                        let analysis = analyze_instance_crash(
+                            &instance_key,
+                            &instance_dir,
+                            status.code(),
+                            recent_logs,
+                        );
+                        // Some startup failures (like EULA not accepted) may still exit with code 0.
+                        // Emit analysis when non-zero exit OR when we matched a known crash signature.
+                        if !status.success() || analysis.crash_code != "E_UNKNOWN_CRASH" {
+                            on_crash_analysis_emit(analysis);
+                        }
                         finished = true;
                     }
                     Ok(None) => {}
@@ -529,4 +559,210 @@ fn read_server_port(instance_dir: &Path) -> Option<u16> {
     }
 
     None
+}
+
+fn read_recent_logs(
+    logs: &Arc<Mutex<HashMap<String, VecDeque<String>>>>,
+    instance_id: &str,
+    limit: usize,
+) -> Vec<String> {
+    let cap = limit.clamp(20, 500);
+    if let Ok(map) = logs.lock() {
+        return map
+            .get(instance_id)
+            .map(|buffer| {
+                let start = buffer.len().saturating_sub(cap);
+                buffer.iter().skip(start).cloned().collect::<Vec<String>>()
+            })
+            .unwrap_or_default();
+    }
+
+    Vec::new()
+}
+
+fn analyze_instance_crash(
+    instance_id: &str,
+    instance_dir: &str,
+    exit_code: Option<i32>,
+    recent_logs: Vec<String>,
+) -> InstanceCrashAnalysisEvent {
+    let joined = recent_logs.join("\n");
+    let lowered = joined.to_lowercase();
+    let excerpt = pick_log_excerpt(&recent_logs, &lowered);
+
+    if lowered.contains("failed to bind to port")
+        || lowered.contains("address already in use")
+        || lowered.contains("bind failed")
+    {
+        return InstanceCrashAnalysisEvent {
+            instance_id: instance_id.to_string(),
+            crash_code: "E_PORT_IN_USE".to_string(),
+            summary: "The startup port is already in use, so the server exited immediately.".to_string(),
+            detail: "Another process is occupying the target port. Free it or change server-port in server.properties."
+                .to_string(),
+            confidence: 92,
+            suggestions: vec![
+                "Stop the process using the port and retry startup.".to_string(),
+                "Change server-port to an available port in server.properties.".to_string(),
+            ],
+            log_excerpt: excerpt,
+        };
+    }
+
+    if lowered.contains("you need to agree to the eula")
+        || lowered.contains("eula.txt")
+        || lowered.contains("eula=false")
+    {
+        return InstanceCrashAnalysisEvent {
+            instance_id: instance_id.to_string(),
+            crash_code: "E_EULA_NOT_ACCEPTED".to_string(),
+            summary: "EULA is not accepted, so the server terminated itself.".to_string(),
+            detail: "Open eula.txt in the instance directory and change eula=false to eula=true."
+                .to_string(),
+            confidence: 96,
+            suggestions: vec![
+                "Set eula=true in eula.txt.".to_string(),
+                "Save the file and start the instance again.".to_string(),
+            ],
+            log_excerpt: excerpt,
+        };
+    }
+
+    if lowered.contains("outofmemoryerror")
+        || lowered.contains("could not reserve enough space")
+        || lowered.contains("java heap space")
+    {
+        return InstanceCrashAnalysisEvent {
+            instance_id: instance_id.to_string(),
+            crash_code: "E_MEMORY_INSUFFICIENT".to_string(),
+            summary: "The JVM crashed due to insufficient memory.".to_string(),
+            detail: "Current memory settings may exceed available RAM, or Xms/Xmx are not well configured."
+                .to_string(),
+            confidence: 90,
+            suggestions: vec![
+                "Lower the maximum heap setting (Xmx) and keep Xms conservative.".to_string(),
+                "Close other memory-heavy applications before retrying.".to_string(),
+            ],
+            log_excerpt: excerpt,
+        };
+    }
+
+    if lowered.contains("unsupportedclassversionerror")
+        || lowered.contains("has been compiled by a more recent version")
+    {
+        return InstanceCrashAnalysisEvent {
+            instance_id: instance_id.to_string(),
+            crash_code: "E_JAVA_VERSION_MISMATCH".to_string(),
+            summary: "Java version mismatch prevented server startup.".to_string(),
+            detail: "The configured Java is older than required, or runtime settings point to the wrong version."
+                .to_string(),
+            confidence: 95,
+            suggestions: vec![
+                "Switch to the recommended Java version.".to_string(),
+                "Confirm runtime settings match server core requirements.".to_string(),
+            ],
+            log_excerpt: excerpt,
+        };
+    }
+
+    if lowered.contains("noclassdeffounderror")
+        || lowered.contains("classnotfoundexception")
+        || lowered.contains("nosuchmethoderror")
+        || lowered.contains("failed to load plugin")
+    {
+        return InstanceCrashAnalysisEvent {
+            instance_id: instance_id.to_string(),
+            crash_code: "E_PLUGIN_OR_MOD_CONFLICT".to_string(),
+            summary: "A plugin or mod compatibility conflict likely caused the crash.".to_string(),
+            detail: "Class loading or method signature errors usually indicate version-incompatible plugins or mods."
+                .to_string(),
+            confidence: 82,
+            suggestions: vec![
+                "Roll back recently added or updated plugins/mods.".to_string(),
+                "Check compatibility matrix for your server core and plugins/mods.".to_string(),
+            ],
+            log_excerpt: excerpt,
+        };
+    }
+
+    let code_text = exit_code
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    if is_eula_not_accepted(instance_dir) {
+        return InstanceCrashAnalysisEvent {
+            instance_id: instance_id.to_string(),
+            crash_code: "E_EULA_NOT_ACCEPTED".to_string(),
+            summary: "EULA is not accepted, so the server terminated itself.".to_string(),
+            detail: "Open eula.txt in the instance directory and change eula=false to eula=true."
+                .to_string(),
+            confidence: 92,
+            suggestions: vec![
+                "Set eula=true in eula.txt.".to_string(),
+                "Save the file and start the instance again.".to_string(),
+            ],
+            log_excerpt: excerpt,
+        };
+    }
+
+    InstanceCrashAnalysisEvent {
+        instance_id: instance_id.to_string(),
+        crash_code: "E_UNKNOWN_CRASH".to_string(),
+        summary: "Server exited unexpectedly and no specific root cause was matched.".to_string(),
+        detail: format!("Process exit code: {code_text}. Check the console tail logs for more details."),
+        confidence: 45,
+        suggestions: vec![
+            "Open the instance console and inspect the last 100 lines.".to_string(),
+            "If crashes repeat, export diagnostics for further analysis.".to_string(),
+        ],
+        log_excerpt: excerpt,
+    }
+}
+
+fn pick_log_excerpt(recent_logs: &[String], lowered: &str) -> Option<String> {
+    if recent_logs.is_empty() {
+        return None;
+    }
+
+    let priority_tokens = [
+        "address already in use",
+        "failed to bind to port",
+        "you need to agree to the eula",
+        "outofmemoryerror",
+        "java heap space",
+        "unsupportedclassversionerror",
+        "compiled by a more recent version",
+        "noclassdeffounderror",
+        "classnotfoundexception",
+        "failed to load plugin",
+        "exception",
+        "error",
+    ];
+
+    for token in priority_tokens {
+        if !lowered.contains(token) {
+            continue;
+        }
+        if let Some(line) = recent_logs
+            .iter()
+            .rev()
+            .find(|line| line.to_lowercase().contains(token))
+        {
+            return Some(line.clone());
+        }
+    }
+
+    recent_logs.last().cloned()
+}
+
+fn is_eula_not_accepted(instance_dir: &str) -> bool {
+    let path = Path::new(instance_dir).join("eula.txt");
+    let Ok(raw) = fs::read_to_string(path) else {
+        return false;
+    };
+
+    raw.lines().any(|line| {
+        let trimmed = line.trim().to_lowercase();
+        trimmed == "eula=false" || trimmed.starts_with("eula=false#")
+    })
 }

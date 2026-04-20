@@ -5,6 +5,7 @@ use launcher_launch::{
         send_instance_command as send_instance_command_impl,
         start_instance_server_managed,
         stop_instance_process as stop_instance_process_impl,
+        InstanceCrashAnalysisEvent,
         InstanceConsoleLogEvent,
         InstanceProcessEvent,
         ProcessState,
@@ -38,9 +39,14 @@ pub fn start_instance_server(
         let _ = app_for_log.emit("instance-console-log", &event);
     });
 
-    let app_for_state = app;
+    let app_for_state = app.clone();
     let state_emitter = Arc::new(move |event: InstanceProcessEvent| {
         let _ = app_for_state.emit("instance-process-state", &event);
+    });
+
+    let app_for_crash = app;
+    let crash_emitter = Arc::new(move |event: InstanceCrashAnalysisEvent| {
+        let _ = app_for_crash.emit("instance-crash-analysis", &event);
     });
 
     start_instance_server_managed(
@@ -48,6 +54,7 @@ pub fn start_instance_server(
         &instance,
         log_emitter,
         state_emitter,
+        crash_emitter,
     )
 }
 

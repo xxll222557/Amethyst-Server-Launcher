@@ -12,6 +12,9 @@ interface LauncherTopBarProps {
   language: AppLanguage;
   onToggleLanguage: () => void;
   onOpenDownloads: () => void;
+  onOpenInbox: () => void;
+  inboxUnreadCount: number;
+  inboxOpen: boolean;
 }
 
 function QuickThemeIcon({ mode }: { mode: AppearanceMode }) {
@@ -59,6 +62,16 @@ function QuickDownloadsIcon() {
       <path d="M9.6 11.8 12 14.2l2.4-2.4" />
       <path d="M12 14.2V5" />
       <rect x="4.6" y="16" width="14.8" height="3.8" rx="1.1" />
+    </svg>
+  );
+}
+
+function QuickInboxIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4.8 7.2h14.4v9.6H4.8z" />
+      <path d="M4.8 8.1 12 13l7.2-4.9" />
+      <path d="M9.3 15.4h5.4" />
     </svg>
   );
 }
@@ -120,6 +133,9 @@ export function LauncherTopBar({
   language,
   onToggleLanguage,
   onOpenDownloads,
+  onOpenInbox,
+  inboxUnreadCount,
+  inboxOpen,
 }: LauncherTopBarProps) {
   const { t } = useI18n();
   const viewTabs = useMemo(
@@ -208,6 +224,22 @@ export function LauncherTopBar({
             title={t("topbar.quick.downloads")}
           >
             <QuickDownloadsIcon />
+          </button>
+
+          <button
+            className={`topbar-quick-button inbox-button ${inboxOpen ? "active" : ""}`}
+            type="button"
+            onClick={onOpenInbox}
+            aria-label={t("topbar.quick.inbox")}
+            title={t("topbar.quick.inbox")}
+            aria-pressed={inboxOpen}
+          >
+            <QuickInboxIcon />
+            {inboxUnreadCount > 0 ? (
+              <span className="topbar-quick-badge" aria-hidden="true">
+                {inboxUnreadCount > 99 ? "99+" : inboxUnreadCount}
+              </span>
+            ) : null}
           </button>
 
           <button

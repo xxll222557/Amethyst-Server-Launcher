@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
+import { CrashAnalysisModal, type CrashAnalysisPayload } from "./components/CrashAnalysisModal";
+import { InboxModal, type InboxEntry } from "./components/InboxModal";
 import { LauncherTopBar } from "./components";
 import type { DownloadTaskView } from "./components/DownloadCenter";
 import { FirstRunGuideModal } from "./components/FirstRunGuideModal";
@@ -10,8 +13,15 @@ import { MarketPage } from "./pages/MarketPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { useSystemResourceMonitor } from "./features/systemResource";
 import { useAppSettings } from "./features/appSettings";
-import { downloadMarketAsset, parseInvokeError, type DownloadProgressEvent } from "./features/instanceService";
+import {
+  downloadMarketAsset,
+  exportTextFile,
+  getInstanceConsoleLogs,
+  parseInvokeError,
+  type DownloadProgressEvent,
+} from "./features/instanceService";
 import { checkForLauncherUpdates } from "./features/updateCheck";
+import type { TranslationKey } from "./i18n";
 import { useI18n } from "./i18n";
 
 type AppView = "home" | "instances" | "market" | "downloads" | "settings";
@@ -53,6 +63,114 @@ interface ToastItem {
   detail?: string;
   actionLabel?: string;
   onAction?: () => void;
+}
+
+interface CrashAnalysisEvent {
+  instanceId: string;
+  crashCode: string;
+  summary: string;
+  detail: string;
+  confidence: number;
+  suggestions: string[];
+  logExcerpt?: string | null;
+}
+
+interface ProcessStateEvent {
+  instanceId: string;
+  status: string;
+  message: string;
+}
+
+type InboxSource = "crash" | "notification" | "runtime";
+
+function analyzeCrashFromLogs(logs: string[]): { crashCode: string; logExcerpt?: string } {
+  const loweredLines = logs.map((line) => line.toLowerCase());
+
+  const findByToken = (tokens: string[]) => {
+    for (const token of tokens) {
+      for (let i = loweredLines.length - 1; i >= 0; i -= 1) {
+        if (loweredLines[i].includes(token)) {
+          return logs[i];
+        }
+      }
+    }
+    return logs[logs.length - 1];
+  };
+
+  const hasAny = (tokens: string[]) => tokens.some((token) => loweredLines.some((line) => line.includes(token)));
+
+  if (hasAny(["failed to bind to port", "address already in use", "bind failed"])) {
+    return { crashCode: "E_PORT_IN_USE", logExcerpt: findByToken(["address already in use", "failed to bind to port", "bind failed"]) };
+  }
+
+  if (hasAny(["you need to agree to the eula", "eula.txt", "eula=false"])) {
+    return { crashCode: "E_EULA_NOT_ACCEPTED", logExcerpt: findByToken(["you need to agree to the eula", "eula.txt", "eula=false"]) };
+  }
+
+  if (hasAny(["outofmemoryerror", "could not reserve enough space", "java heap space"])) {
+    return { crashCode: "E_MEMORY_INSUFFICIENT", logExcerpt: findByToken(["outofmemoryerror", "java heap space", "could not reserve enough space"]) };
+  }
+
+  if (hasAny(["unsupportedclassversionerror", "has been compiled by a more recent version"])) {
+    return { crashCode: "E_JAVA_VERSION_MISMATCH", logExcerpt: findByToken(["unsupportedclassversionerror", "compiled by a more recent version"]) };
+  }
+
+  if (hasAny(["noclassdeffounderror", "classnotfoundexception", "nosuchmethoderror", "failed to load plugin"])) {
+    return { crashCode: "E_PLUGIN_OR_MOD_CONFLICT", logExcerpt: findByToken(["noclassdeffounderror", "classnotfoundexception", "nosuchmethoderror", "failed to load plugin"]) };
+  }
+
+  return { crashCode: "E_UNKNOWN_CRASH", logExcerpt: logs[logs.length - 1] };
+}
+
+function resolveCrashCopy(
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+  crashCode: string,
+) {
+  if (crashCode === "E_PORT_IN_USE") {
+    return {
+      summary: t("crashReason.E_PORT_IN_USE.summary"),
+      detail: t("crashReason.E_PORT_IN_USE.detail"),
+      suggestion: t("crashReason.E_PORT_IN_USE.suggestion"),
+    };
+  }
+
+  if (crashCode === "E_EULA_NOT_ACCEPTED") {
+    return {
+      summary: t("crashReason.E_EULA_NOT_ACCEPTED.summary"),
+      detail: t("crashReason.E_EULA_NOT_ACCEPTED.detail"),
+      suggestion: t("crashReason.E_EULA_NOT_ACCEPTED.suggestion"),
+    };
+  }
+
+  if (crashCode === "E_MEMORY_INSUFFICIENT") {
+    return {
+      summary: t("crashReason.E_MEMORY_INSUFFICIENT.summary"),
+      detail: t("crashReason.E_MEMORY_INSUFFICIENT.detail"),
+      suggestion: t("crashReason.E_MEMORY_INSUFFICIENT.suggestion"),
+    };
+  }
+
+  if (crashCode === "E_JAVA_VERSION_MISMATCH") {
+    return {
+      summary: t("crashReason.E_JAVA_VERSION_MISMATCH.summary"),
+      detail: t("crashReason.E_JAVA_VERSION_MISMATCH.detail"),
+      suggestion: t("crashReason.E_JAVA_VERSION_MISMATCH.suggestion"),
+    };
+  }
+
+  if (crashCode === "E_PLUGIN_OR_MOD_CONFLICT") {
+    return {
+      summary: t("crashReason.E_PLUGIN_OR_MOD_CONFLICT.summary"),
+      detail: t("crashReason.E_PLUGIN_OR_MOD_CONFLICT.detail"),
+      suggestion: t("crashReason.E_PLUGIN_OR_MOD_CONFLICT.suggestion"),
+    };
+  }
+
+  return {
+    summary: t("crashReason.E_UNKNOWN_CRASH.summary"),
+    detail: t("crashReason.E_UNKNOWN_CRASH.detail"),
+    suggestion: t("crashReason.E_UNKNOWN_CRASH.suggestion"),
+  };
 }
 
 function ToastStatusIcon({ tone }: { tone: ToastTone }) {
@@ -372,6 +490,12 @@ function App() {
     parseStoredDownloadTasks(window.localStorage.getItem(DOWNLOAD_TASKS_STORAGE_KEY)),
   );
   const [showFirstRunGuide, setShowFirstRunGuide] = useState(false);
+  const [crashQueue, setCrashQueue] = useState<CrashAnalysisPayload[]>([]);
+  const [activeCrash, setActiveCrash] = useState<CrashAnalysisPayload | null>(null);
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [inboxItems, setInboxItems] = useState<InboxEntry[]>([]);
+  const [inboxOnlyUnread, setInboxOnlyUnread] = useState(false);
+  const lastCrashFingerprintRef = useRef<Map<string, number>>(new Map());
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [appSettings, setAppSettings] = useAppSettings();
   const [viewTransition, setViewTransition] = useState<{
@@ -380,6 +504,37 @@ function App() {
     direction: "forward" | "backward";
   } | null>(null);
   const systemResources = useSystemResourceMonitor(resourceRefreshIntervalMs);
+  const inboxUnreadCount = useMemo(() => inboxItems.filter((item) => !item.read).length, [inboxItems]);
+
+  const pushInbox = (entry: {
+    level: InboxEntry["level"];
+    title: string;
+    detail?: string;
+    instanceId?: string;
+    source: InboxSource;
+  }) => {
+    const nextId = Date.now() + Math.floor(Math.random() * 1000);
+    const sourceLabel =
+      entry.source === "crash"
+        ? t("inbox.source.crash")
+        : entry.source === "runtime"
+          ? t("inbox.source.runtime")
+          : t("inbox.source.notification");
+
+    setInboxItems((prev) => [
+      {
+        id: nextId,
+        level: entry.level,
+        title: entry.title,
+        detail: entry.detail,
+        instanceId: entry.instanceId,
+        source: sourceLabel,
+        createdAt: Date.now(),
+        read: inboxOpen,
+      },
+      ...prev,
+    ].slice(0, 200));
+  };
 
   useEffect(() => {
     const dismissed = window.localStorage.getItem(FIRST_RUN_GUIDE_DISMISSED_KEY) === "1";
@@ -391,6 +546,16 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(DOWNLOAD_TASKS_STORAGE_KEY, JSON.stringify(downloadTasks.slice(0, 300)));
   }, [downloadTasks]);
+
+  useEffect(() => {
+    if (activeCrash || crashQueue.length === 0) {
+      return;
+    }
+
+    const [next, ...rest] = crashQueue;
+    setActiveCrash(next);
+    setCrashQueue(rest);
+  }, [activeCrash, crashQueue]);
 
   const runUpdateCheck = async (manual: boolean) => {
     if (checkingUpdates) {
@@ -660,9 +825,48 @@ function App() {
   const notify = ({ tone, title, detail, actionLabel, onAction, durationMs = 3000 }: NotifyPayload) => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     setToasts((prev) => [...prev.slice(-4), { id, tone, title, detail, actionLabel, onAction }]);
+
+    if (tone === "danger" || tone === "error") {
+      pushInbox({ level: "error", title, detail, source: "notification" });
+    } else if (tone === "info") {
+      pushInbox({ level: "warning", title, detail, source: "notification" });
+    }
+
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, durationMs);
+  };
+
+  const openInbox = () => {
+    setInboxOpen(true);
+    setInboxItems((prev) => prev.map((item) => (item.read ? item : { ...item, read: true })));
+  };
+
+  const exportInbox = async (items: InboxEntry[]) => {
+    const selected = await save({
+      title: t("inbox.exportDialogTitle"),
+      defaultPath: `asl-inbox-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.log`,
+      filters: [{ name: "Log", extensions: ["log", "txt"] }],
+    });
+
+    if (!selected) {
+      return;
+    }
+
+    const lines = items.map((item) => {
+      const ts = new Date(item.createdAt).toISOString();
+      const instance = item.instanceId ? ` [instance=${item.instanceId}]` : "";
+      const detail = item.detail ? `\n${item.detail}` : "";
+      return `[${ts}] [${item.level.toUpperCase()}] [${item.source}]${instance} ${item.title}${detail}`;
+    });
+
+    try {
+      await exportTextFile(selected, lines.join("\n\n"));
+      notify({ tone: "success", title: t("inbox.exported"), detail: selected });
+    } catch (error) {
+      const detail = typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
+      notify({ tone: "error", title: t("inbox.exportFailed"), detail });
+    }
   };
 
   useEffect(() => {
@@ -719,6 +923,124 @@ function App() {
       void unlistenPromise.then((unlisten) => unlisten?.());
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const setup = async () => {
+      const unlisten = await listen<CrashAnalysisEvent>("instance-crash-analysis", (event) => {
+        if (!active || !event.payload) {
+          return;
+        }
+
+        const payload = event.payload;
+        const fingerprint = `${payload.instanceId}:${payload.crashCode}`;
+        lastCrashFingerprintRef.current.set(fingerprint, Date.now());
+        const localized = resolveCrashCopy(t, payload.crashCode);
+        const normalized: CrashAnalysisPayload = {
+          instanceId: payload.instanceId,
+          crashCode: payload.crashCode,
+          summary: localized.summary,
+          detail: localized.detail,
+          confidence: payload.confidence,
+          suggestions: [localized.suggestion || t("crashPrompt.defaultSuggestion")],
+          logExcerpt: payload.logExcerpt,
+        };
+
+        setCrashQueue((prev) => [...prev.slice(-3), normalized]);
+        pushInbox({
+          level: "error",
+          title: localized.summary,
+          detail: `${localized.detail} (${payload.instanceId})`,
+          instanceId: payload.instanceId,
+          source: "crash",
+        });
+      });
+
+      if (!active) {
+        unlisten();
+      }
+
+      return unlisten;
+    };
+
+    const unlistenPromise = setup();
+
+    return () => {
+      active = false;
+      void unlistenPromise.then((unlisten) => unlisten?.());
+    };
+  }, [t]);
+
+  useEffect(() => {
+    let active = true;
+
+    const setup = async () => {
+      const unlisten = await listen<ProcessStateEvent>("instance-process-state", (event) => {
+        if (!active || !event.payload) {
+          return;
+        }
+
+        const payload = event.payload;
+        if (payload.status !== "stopped" && payload.status !== "error") {
+          return;
+        }
+
+        void (async () => {
+          try {
+            const logs = await getInstanceConsoleLogs(payload.instanceId, 300);
+            const result = analyzeCrashFromLogs(logs);
+            if (result.crashCode === "E_UNKNOWN_CRASH") {
+              return;
+            }
+
+            const fingerprint = `${payload.instanceId}:${result.crashCode}`;
+            const now = Date.now();
+            const lastAt = lastCrashFingerprintRef.current.get(fingerprint) ?? 0;
+            if (now - lastAt < 10_000) {
+              return;
+            }
+            lastCrashFingerprintRef.current.set(fingerprint, now);
+
+            const localized = resolveCrashCopy(t, result.crashCode);
+            const normalized: CrashAnalysisPayload = {
+              instanceId: payload.instanceId,
+              crashCode: result.crashCode,
+              summary: localized.summary,
+              detail: localized.detail,
+              confidence: 88,
+              suggestions: [localized.suggestion || t("crashPrompt.defaultSuggestion")],
+              logExcerpt: result.logExcerpt,
+            };
+
+            setCrashQueue((prev) => [...prev.slice(-3), normalized]);
+            pushInbox({
+              level: "warning",
+              title: localized.summary,
+              detail: `${localized.detail} (${payload.instanceId})`,
+              instanceId: payload.instanceId,
+              source: "runtime",
+            });
+          } catch {
+            // ignore fallback analysis errors
+          }
+        })();
+      });
+
+      if (!active) {
+        unlisten();
+      }
+
+      return unlisten;
+    };
+
+    const unlistenPromise = setup();
+
+    return () => {
+      active = false;
+      void unlistenPromise.then((unlisten) => unlisten?.());
+    };
+  }, [t]);
 
   useEffect(() => {
     const runningMarketTask = downloadTasks.find(
@@ -818,6 +1140,9 @@ function App() {
           language={appSettings.about.language}
           onToggleLanguage={toggleLanguage}
           onOpenDownloads={() => changeActiveView("downloads")}
+          onOpenInbox={openInbox}
+          inboxUnreadCount={inboxUnreadCount}
+          inboxOpen={inboxOpen}
         />
 
         <div className="view-frame">
@@ -883,6 +1208,22 @@ function App() {
             setShowFirstRunGuide(false);
             changeActiveView("settings");
           }}
+        />
+
+        <CrashAnalysisModal
+          open={Boolean(activeCrash)}
+          payload={activeCrash}
+          onClose={() => setActiveCrash(null)}
+        />
+
+        <InboxModal
+          open={inboxOpen}
+          items={inboxItems}
+          onlyUnread={inboxOnlyUnread}
+          onToggleOnlyUnread={() => setInboxOnlyUnread((v) => !v)}
+          onClose={() => setInboxOpen(false)}
+          onClear={() => setInboxItems([])}
+          onExport={exportInbox}
         />
       </main>
     </div>
