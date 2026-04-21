@@ -61,9 +61,8 @@
   min-height: 62px;
   margin: 0;
   padding: 8px 14px 8px;
-  border-radius: 0 0 16px 16px;
+  border-radius: 16px;
   border: 1px solid var(--surface-border);
-  border-top: 0;
   background:
     var(--topbar-overlay),
     radial-gradient(circle at 18% -36%, rgba(var(--theme-accent-rgb), 0.22), transparent 46%);
@@ -88,22 +87,6 @@
   pointer-events: none;
 }
 
-.topbar,
-.topbar * {
-  -webkit-app-region: drag;
-}
-
-.topbar button,
-.topbar a,
-.topbar input,
-.topbar select,
-.topbar textarea,
-.topbar .tab-nav,
-.topbar .topbar-actions,
-.topbar .window-controls {
-  -webkit-app-region: no-drag;
-}
-
 .topbar-left,
 .topbar-right {
   display: flex;
@@ -113,10 +96,6 @@
 
 .topbar-left {
   min-width: 0;
-}
-
-.topbar.macos .topbar-left {
-  padding-left: 112px;
 }
 
 .topbar-center {
@@ -265,79 +244,6 @@
 .topbar-actions .primary-action,
 .topbar-actions .secondary-action {
   white-space: nowrap;
-}
-
-.window-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: 2px;
-}
-
-.window-controls.macos {
-  margin-right: 8px;
-  margin-left: 0;
-  gap: 7px;
-}
-
-.window-controls.native {
-  gap: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.window-dot {
-  width: 13px;
-  height: 13px;
-  border-radius: 999px;
-  border: 1px solid rgba(0, 0, 0, 0.35);
-  cursor: pointer;
-  padding: 0;
-}
-
-.window-dot,
-.window-native-button {
-  -webkit-app-region: no-drag;
-}
-
-.window-dot.minimize { background: #f6c344; }
-.window-dot.maximize { background: #47c766; }
-.window-dot.close { background: #f75f57; }
-
-.window-dot:hover {
-  filter: brightness(0.94);
-}
-
-.window-dot:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.72);
-  outline-offset: 1px;
-}
-
-.window-native-button {
-  width: 40px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.03);
-  border-right: 1px solid var(--surface-border);
-  cursor: pointer;
-}
-
-.window-native-button:last-child { border-right: 0; }
-.window-native-button:hover { background: rgba(255, 255, 255, 0.12); }
-.window-native-button.close:hover { background: #d84b42; color: #ffffff; }
-
-.window-native-icon {
-  line-height: 1;
-  font-size: 0.95rem;
-}
-
-.window-native-icon.square {
-  width: 10px;
-  height: 10px;
-  border: 1.6px solid currentColor;
 }
 
 .tab-nav,

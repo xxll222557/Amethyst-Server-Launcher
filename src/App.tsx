@@ -1132,7 +1132,6 @@ function App() {
     <div className="app-shell">
       <main className="content">
         <LauncherTopBar
-          platform={platform}
           activeView={activeView}
           onActiveViewChange={changeActiveView}
           appearanceMode={appSettings.personalization.appearanceMode}

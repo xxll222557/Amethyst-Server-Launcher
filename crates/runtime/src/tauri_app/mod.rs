@@ -15,22 +15,7 @@ pub fn build_tauri_app() -> tauri::Builder<tauri::Wry> {
                 .inner_size(1280.0, 760.0)
                 .min_inner_size(1180.0, 680.0);
 
-            #[cfg(target_os = "macos")]
-            {
-                use tauri::{LogicalPosition, TitleBarStyle};
-
-                let builder = builder
-                    .title_bar_style(TitleBarStyle::Overlay)
-                    .hidden_title(true)
-                    .traffic_light_position(LogicalPosition::new(24.0, 20.0));
-                let _window = builder.build().expect("failed to build main window");
-            }
-
-            #[cfg(not(target_os = "macos"))]
-            {
-                let builder = builder.decorations(false);
-                let _window = builder.build().expect("failed to build main window");
-            }
+            let _window = builder.build().expect("failed to build main window");
 
             Ok(())
         })

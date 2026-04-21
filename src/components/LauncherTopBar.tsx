@@ -1,10 +1,8 @@
-import { WindowControls } from "./WindowControls";
 import { useI18n } from "../i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppLanguage, AppearanceMode } from "../features/appSettings";
 
 interface LauncherTopBarProps {
-  platform: "macos" | "windows" | "linux" | "unknown";
   activeView: "home" | "instances" | "market" | "downloads" | "settings";
   onActiveViewChange: (view: "home" | "instances" | "market" | "downloads" | "settings") => void;
   appearanceMode: AppearanceMode;
@@ -125,7 +123,6 @@ function ViewIcon({ view }: { view: "home" | "instances" | "market" | "settings"
 }
 
 export function LauncherTopBar({
-  platform,
   activeView,
   onActiveViewChange,
   appearanceMode,
@@ -183,7 +180,7 @@ export function LauncherTopBar({
   }, [activeView, viewTabs]);
 
   return (
-    <header className={`topbar ${platform}`} data-tauri-drag-region>
+    <header className="topbar">
       <div className="topbar-left">
         <div className="brand-block compact">
           <h1 className="topbar-brand-name">{t("app.brand.launcherName")}</h1>
@@ -269,7 +266,6 @@ export function LauncherTopBar({
           </button>
         </div>
 
-        <WindowControls platform={platform} />
       </div>
     </header>
   );
